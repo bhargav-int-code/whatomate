@@ -28,13 +28,14 @@ A webhook has a `name`, a target `url`, a list of `events`, optional custom `hea
 
 ## Event catalog
 
-Seven event types can be subscribed to:
+Eight event types can be subscribed to:
 
 | Event | Fires when |
 |---|---|
 | `message.incoming` | A new message is received from a contact. |
 | `message.sent` | An agent sends a message. |
 | `message.outgoing` | A message is sent to a contact (includes echoes). |
+| `message.failed` | An outgoing message fails to send, or Meta later reports it as failed. |
 | `contact.created` | A new contact is created. |
 | `transfer.created` | A transfer to a human agent is requested. |
 | `transfer.assigned` | A transfer is assigned to an agent. |
@@ -52,7 +53,7 @@ Every delivery is a `POST` with `Content-Type: application/json` and a `User-Age
 }
 ```
 
-The `data` object depends on the event — message events carry `message_id`, `contact_id`, `contact_phone`, `contact_name`, `message_type`, `content`, and `whatsapp_account`, and `message.incoming` additionally carries `reply_to_message_id` when the incoming message is a reply; transfer events carry `transfer_id`, the contact fields, `source`, and (once assigned) `agent_id` / `agent_name`. Any custom headers you configured on the webhook are added to the request.
+The `data` object depends on the event — message events carry `message_id`, `contact_id`, `contact_phone`, `contact_name`, `message_type`, `content`, and `whatsapp_account`, and `message.incoming` additionally carries `reply_to_message_id` when the incoming message is a reply; `message.failed` additionally carries `source` (`send_error` or `status_callback`), the error fields, and `whatsapp_message_id` / `template_name` / `campaign_id` when known (see the [API Reference](/whatomate/api-reference/webhooks) for the full shape); transfer events carry `transfer_id`, the contact fields, `source`, and (once assigned) `agent_id` / `agent_name`. Any custom headers you configured on the webhook are added to the request.
 
 ## Verifying the signature
 

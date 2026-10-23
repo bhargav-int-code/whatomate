@@ -155,6 +155,7 @@ API returns `502 Bad Gateway`.
 | `message.incoming` | A new message is received from a contact |
 | `message.sent` | An agent sends a message |
 | `message.outgoing` | A message is sent to a contact (includes echoes) |
+| `message.failed` | An outgoing message fails to send, or Meta reports it as failed |
 | `contact.created` | A new contact is created |
 | `transfer.created` | A transfer to a human agent is requested |
 | `transfer.assigned` | A transfer is assigned to an agent |
@@ -173,6 +174,50 @@ Every delivery is a POST with this envelope:
 ```
 
 The `data` object varies by event (message, contact, or transfer details).
+
+### `message.failed` Payload
+
+Fires for outgoing messages sent by agents, the API, the chatbot and SLA notifications, at
+most once per message. Campaign messages fire only for `status_callback` failures; a campaign
+send that is rejected outright is recorded on the campaign's recipient list instead.
+`source` tells you where the failure came from:
+
+- `send_error` — the send request was rejected (or never completed), so the message has no
+  `whatsapp_message_id`. `error_message` holds the error text; `error_code` is not set.
+- `status_callback` — Meta accepted the message and later sent a `failed` status. `error_code`,
+  `error_title` and `error_details` come from Meta's status error.
+
+```json
+{
+  "event": "message.failed",
+  "timestamp": "2026-10-23T12:00:00Z",
+  "data": {
+    "message_id": "a1b2c3d4-...",
+    "whatsapp_message_id": "wamid.HBgM...",
+    "contact_id": "e5f6g7h8-...",
+    "contact_phone": "919876543210",
+    "contact_name": "John Doe",
+    "message_type": "template",
+    "content": "Hello John, your order has shipped",
+    "template_name": "order_shipped",
+    "whatsapp_account": "Main Account",
+    "campaign_id": "c1d2e3f4-...",
+    "source": "status_callback",
+    "error_code": 131047,
+    "error_title": "Re-engagement message",
+    "error_message": "Message failed to send because more than 24 hours have passed since the customer last replied to this number.",
+    "error_details": "Message failed to send because more than 24 hours have passed since the customer last replied to this number."
+  }
+}
+```
+
+Empty optional fields (`whatsapp_message_id`, `template_name`, `sent_by_user_id`,
+`campaign_id`, `error_code`, `error_title`, `error_details`) are omitted.
+
+<Aside type="note">
+  `status_callback` failures need the **messages** field subscribed in your Meta App's
+  WhatsApp webhook configuration; status updates are delivered on that field.
+</Aside>
 
 ### Signing
 

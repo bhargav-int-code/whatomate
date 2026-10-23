@@ -39,6 +39,36 @@ type MessageEventData struct {
 	SentByUserID     string             `json:"sent_by_user_id,omitempty"`
 }
 
+// Message failure sources reported in MessageFailedEventData.Source
+const (
+	// MessageFailureSourceSendError means the send request to Meta was rejected
+	// (or never completed), so the message has no WhatsApp message ID.
+	MessageFailureSourceSendError = "send_error"
+	// MessageFailureSourceStatusCallback means Meta accepted the message and
+	// later reported status=failed via the statuses webhook.
+	MessageFailureSourceStatusCallback = "status_callback"
+)
+
+// MessageFailedEventData represents data for the message.failed event
+type MessageFailedEventData struct {
+	MessageID         string             `json:"message_id"`
+	WhatsAppMessageID string             `json:"whatsapp_message_id,omitempty"`
+	ContactID         string             `json:"contact_id"`
+	ContactPhone      string             `json:"contact_phone"`
+	ContactName       string             `json:"contact_name"`
+	MessageType       models.MessageType `json:"message_type"`
+	Content           string             `json:"content"`
+	TemplateName      string             `json:"template_name,omitempty"`
+	WhatsAppAccount   string             `json:"whatsapp_account"`
+	SentByUserID      string             `json:"sent_by_user_id,omitempty"`
+	CampaignID        string             `json:"campaign_id,omitempty"`
+	Source            string             `json:"source"`
+	ErrorCode         int                `json:"error_code,omitempty"` // Meta error code; only set for status_callback failures
+	ErrorTitle        string             `json:"error_title,omitempty"`
+	ErrorMessage      string             `json:"error_message"`
+	ErrorDetails      string             `json:"error_details,omitempty"`
+}
+
 // ContactEventData represents data for contact events
 type ContactEventData struct {
 	ContactID       string `json:"contact_id"`

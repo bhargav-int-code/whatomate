@@ -437,6 +437,11 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 
+		a.dispatchMessageFailedWebhook(msg, req.Contact, MessageFailedEventData{
+			Source:       MessageFailureSourceSendError,
+			ErrorMessage: errMsg,
+		})
+
 		// Broadcast failure status via WebSocket so frontend updates immediately
 		if opts.BroadcastWebSocket && a.WSHub != nil {
 			a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
@@ -581,6 +586,36 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 		Direction:       models.DirectionOutgoing,
 		SentByUserID:    sentByUserID,
 	})
+}
+
+// dispatchMessageFailedWebhook dispatches webhook for message.failed event.
+// Unlike message.sent it is not gated by MessageSendOptions.DispatchWebhook:
+// chatbot and SLA sends are suppressed for message.sent to avoid noise, but a
+// failure is always actionable. contact may be nil if it could not be loaded.
+// A ContactPhone already set on data (Meta's recipient_id) is kept; the
+// contact's stored phone is only a fallback.
+func (a *App) dispatchMessageFailedWebhook(msg *models.Message, contact *models.Contact, data MessageFailedEventData) {
+	data.MessageID = msg.ID.String()
+	data.WhatsAppMessageID = msg.WhatsAppMessageID
+	data.ContactID = msg.ContactID.String()
+	data.MessageType = msg.MessageType
+	data.Content = msg.Content
+	data.TemplateName = msg.TemplateName
+	data.WhatsAppAccount = msg.WhatsAppAccount
+	if msg.SentByUserID != nil {
+		data.SentByUserID = msg.SentByUserID.String()
+	}
+	if campaignID, ok := msg.Metadata["campaign_id"].(string); ok {
+		data.CampaignID = campaignID
+	}
+	if contact != nil {
+		if data.ContactPhone == "" {
+			data.ContactPhone = contact.PhoneNumber
+		}
+		data.ContactName = contact.ProfileName
+	}
+
+	a.DispatchWebhook(msg.OrganizationID, models.WebhookEventMessageFailed, data)
 }
 
 // updateContactLastMessage updates contact's last_message_at and preview

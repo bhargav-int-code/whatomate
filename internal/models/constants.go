@@ -213,6 +213,7 @@ const (
 	WebhookEventMessageIncoming  WebhookEvent = "message.incoming"
 	WebhookEventMessageOutgoing  WebhookEvent = "message.outgoing"
 	WebhookEventMessageSent      WebhookEvent = "message.sent"
+	WebhookEventMessageFailed    WebhookEvent = "message.failed"
 	WebhookEventContactCreated   WebhookEvent = "contact.created"
 	WebhookEventTransferCreated  WebhookEvent = "transfer.created"
 	WebhookEventTransferResumed  WebhookEvent = "transfer.resumed"

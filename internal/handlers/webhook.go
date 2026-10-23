@@ -378,7 +378,7 @@ func (a *App) processStatusUpdate(phoneNumberID string, status WebhookStatus) {
 	a.Log.Info("Processing status update", "message_id", messageID, "status", statusValue, "phone_number_id", phoneNumberID)
 
 	// Update messages table - this also handles campaign stats via incrementCampaignStat
-	a.updateMessageStatus(messageID, statusValue, status.Errors)
+	a.updateMessageStatus(messageID, statusValue, status.RecipientID, status.Errors)
 }
 
 // statusPriority returns the priority of a status (higher = more progressed)
@@ -399,8 +399,10 @@ func statusPriority(status models.MessageStatus) int {
 	}
 }
 
-// updateMessageStatus updates the status of a regular message in the messages table
-func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []WebhookStatusError) {
+// updateMessageStatus updates the status of a regular message in the messages table.
+// recipientPhone is Meta's recipient_id from the status callback; it may be
+// empty for username-only (BSUID) recipients.
+func (a *App) updateMessageStatus(whatsappMsgID, statusValue, recipientPhone string, errors []WebhookStatusError) {
 	// Find the message by WhatsApp message ID
 	var message models.Message
 	result := a.DB.Where("whats_app_message_id = ?", whatsappMsgID).First(&message)
@@ -410,6 +412,9 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 	}
 
 	newStatus := models.MessageStatus(statusValue)
+	// Meta can redeliver a failed status; only the first transition into
+	// failed should fire the message.failed webhook.
+	wasFailed := message.Status == models.MessageStatusFailed
 	currentPriority := statusPriority(message.Status)
 	newPriority := statusPriority(newStatus)
 
@@ -456,6 +461,28 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 	}
 
 	a.Log.Info("Updated message status", "message_id", message.ID, "status", statusValue)
+
+	if newStatus == models.MessageStatusFailed && !wasFailed {
+		// Meta's recipient_id is the number it actually tried to deliver to, so
+		// it wins over the contact row, which may have been edited or deleted.
+		failed := MessageFailedEventData{
+			Source:       MessageFailureSourceStatusCallback,
+			ContactPhone: recipientPhone,
+		}
+		failed.ErrorMessage, _ = updates["error_message"].(string)
+		if len(errors) > 0 {
+			failed.ErrorCode = errors[0].Code
+			failed.ErrorTitle = errors[0].Title
+			failed.ErrorDetails = errors[0].ErrorData.Details
+		}
+		var contact models.Contact
+		if err := a.DB.Where("id = ? AND organization_id = ?", message.ContactID, message.OrganizationID).First(&contact).Error; err != nil {
+			a.Log.Warn("Contact not found for failed message webhook", "error", err, "message_id", message.ID)
+			a.dispatchMessageFailedWebhook(&message, nil, failed)
+		} else {
+			a.dispatchMessageFailedWebhook(&message, &contact, failed)
+		}
+	}
 
 	// Update campaign stats and recipient status if this is a campaign message
 	if message.Metadata != nil {
