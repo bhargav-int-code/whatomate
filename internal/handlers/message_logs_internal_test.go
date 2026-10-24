@@ -145,12 +145,12 @@ func TestSaveIncomingMessage_RecordsIncomingSource(t *testing.T) {
 
 func TestMessageLogCursor_RoundTrip(t *testing.T) {
 	row := messageLogRow{ID: uuid.New(), CreatedAt: time.Date(2026, 10, 24, 10, 49, 53, 123456000, time.UTC)}
-	c, err := decodeMessageLogCursor(encodeMessageLogCursor(row))
+	c, err := decodeLogCursor(encodeLogCursor(row.CreatedAt, row.ID))
 	require.NoError(t, err)
 	assert.Equal(t, row.ID, c.ID)
 	assert.True(t, row.CreatedAt.Equal(c.CreatedAt))
 
-	_, err = decodeMessageLogCursor("bm90LWEtY3Vyc29y") // base64 of "not-a-cursor"
+	_, err = decodeLogCursor("bm90LWEtY3Vyc29y") // base64 of "not-a-cursor"
 	assert.Error(t, err)
 }
 
@@ -168,6 +168,6 @@ func TestWithStatementTimeout_CancelsSlowQueriesWith422(t *testing.T) {
 	require.Error(t, err)
 
 	req := testutil.NewGETRequest(t)
-	require.NoError(t, app.sendMessageLogQueryError(req, err))
+	require.NoError(t, app.sendLogQueryError(req, err, "message logs"))
 	assert.Equal(t, fasthttp.StatusUnprocessableEntity, testutil.GetResponseStatusCode(req))
 }

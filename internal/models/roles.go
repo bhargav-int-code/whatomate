@@ -86,6 +86,7 @@ const (
 	ResourceOutgoingCalls           = "outgoing_calls"
 	ResourceAuditLogs               = "audit_logs"
 	ResourceMessageLogs             = "message_logs"
+	ResourceWebhookLogs             = "webhook_logs"
 )
 
 // PermissionAction constants for available actions
@@ -239,6 +240,10 @@ func DefaultPermissions() []Permission {
 
 		// Message Logs
 		{Resource: ResourceMessageLogs, Action: ActionRead, Description: "View message delivery logs"},
+
+		// Webhook Logs
+		{Resource: ResourceWebhookLogs, Action: ActionRead, Description: "View webhook delivery logs"},
+		{Resource: ResourceWebhookLogs, Action: ActionDelete, Description: "Purge webhook delivery logs"},
 	}
 }
 
@@ -293,6 +298,8 @@ func SystemRolePermissions() map[string][]string {
 		"outgoing_calls:read", "outgoing_calls:write",
 		// Message Logs
 		"message_logs:read",
+		// Webhook Logs (purge is admin-only)
+		"webhook_logs:read",
 	}
 
 	agentPermissions := []string{

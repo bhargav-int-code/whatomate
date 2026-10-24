@@ -87,7 +87,8 @@ Delivery is **asynchronous** — the API call that triggered the event returns i
 - Sends only to **active** webhooks that subscribe to that event.
 - Delivers to up to **10 webhooks concurrently** per dispatch.
 - Treats any **2xx** response as success. A non-2xx status or a network error is a failure.
-- **Retries up to 3 times** with exponential backoff between attempts (delays double: ~2s then ~4s). After the final attempt the failure is logged and the delivery is dropped — there is no persistent dead-letter queue.
+- **Retries up to 3 times** with exponential backoff between attempts (delays double: ~2s then ~4s). After the final attempt the delivery is not retried again — there is no persistent dead-letter queue.
+- Records every delivery in the **webhook logs**: the exact request (URL, headers, body), each attempt's status and error, and the start of your endpoint's response. See the [Webhook Logs API](/whatomate/api-reference/webhook-logs).
 
 Use `POST /api/webhooks/{id}/test` to send a one-off `{"event":"test", ...}` payload synchronously and confirm your endpoint accepts and verifies it.
 

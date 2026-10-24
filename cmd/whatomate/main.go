@@ -288,6 +288,10 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Close out webhook deliveries left "processing" by a restart
+	sweepCtx, sweepCancel := context.WithCancel(context.Background())
+	go app.StartWebhookDeliverySweeper(sweepCtx)
+
 	// Start embedded workers
 	var workers []*worker.Worker
 	var workerCancel context.CancelFunc
@@ -332,6 +336,7 @@ func runServer(args []string) {
 	slaCancel()
 	slaProcessor.Stop()
 	lo.Info("SLA processor stopped")
+	sweepCancel()
 
 	// Stop workers first
 	if workerCancel != nil {
@@ -819,6 +824,11 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/webhooks/{id}", app.UpdateWebhook)
 	g.DELETE("/api/webhooks/{id}", app.DeleteWebhook)
 	g.POST("/api/webhooks/{id}/test", app.TestWebhook)
+
+	// Webhook Logs
+	g.GET("/api/webhook-logs", app.ListWebhookLogs)
+	g.POST("/api/webhook-logs/purge", app.PurgeWebhookLogs)
+	g.GET("/api/webhook-logs/{id}", app.GetWebhookLog)
 
 	// Custom Actions
 	g.GET("/api/custom-actions", app.ListCustomActions)

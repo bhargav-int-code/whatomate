@@ -69,6 +69,7 @@ export default defineConfig({
             { label: 'Calling', slug: 'api-reference/calling' },
             { label: 'IVR Flows', slug: 'api-reference/ivr-flows' },
             { label: 'Webhooks', slug: 'api-reference/webhooks' },
+            { label: 'Webhook Logs', slug: 'api-reference/webhook-logs' },
             { label: 'Analytics', slug: 'api-reference/analytics' },
             { label: 'Dashboard Widgets', slug: 'api-reference/widgets' },
             { label: 'Export & Import', slug: 'api-reference/export-import' },

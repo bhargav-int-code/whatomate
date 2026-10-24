@@ -105,6 +105,7 @@ This is the complete seeded catalogue — exactly the permissions returned by `G
 | `outgoing_calls` | read, write | Outbound calling |
 | `audit_logs` | read | Audit trail (read-only) |
 | `message_logs` | read | Message delivery logs |
+| `webhook_logs` | read, delete | Webhook delivery logs; `delete` purges them |
 
 <Aside type="note">
   `settings.calling`, `settings.notification` and the `settings.chatbot.*` sub-resources

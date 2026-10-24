@@ -66,6 +66,7 @@ func GetMigrationModels() []MigrationModel {
 		{"APIKey", &models.APIKey{}},
 		{"SSOProvider", &models.SSOProvider{}},
 		{"Webhook", &models.Webhook{}},
+		{"WebhookDelivery", &models.WebhookDelivery{}},
 		{"CustomAction", &models.CustomAction{}},
 		{"WhatsAppAccount", &models.WhatsAppAccount{}},
 		{"Contact", &models.Contact{}},
@@ -294,6 +295,14 @@ func getIndexes() []string {
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_org_account_created ON messages(organization_id, whats_app_account, created_at DESC, id DESC)`,
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_org_status_created ON messages(organization_id, status, created_at DESC, id DESC)`,
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_org_template_created ON messages(organization_id, template_name, created_at DESC, id DESC)`,
+		// Webhook logs
+		`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_org_created ON webhook_deliveries(organization_id, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_org_webhook_created ON webhook_deliveries(organization_id, webhook_id, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_org_status_created ON webhook_deliveries(organization_id, status, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_org_reference ON webhook_deliveries(organization_id, reference_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_org_phone ON webhook_deliveries(organization_id, contact_phone)`,
+		// Partial index so the stale-delivery sweep doesn't scan finished rows.
+		`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_processing ON webhook_deliveries(created_at) WHERE status = 'processing'`,
 	}
 }
 

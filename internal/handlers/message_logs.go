@@ -1,13 +1,10 @@
 package handlers
 
 import (
-	"encoding/base64"
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/valyala/fasthttp"
@@ -15,21 +12,9 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	// messageLogsPageSize is the fixed page size; there is no total count, the
-	// page is walked with older/newer cursors instead.
-	messageLogsPageSize = 50
-	// messageLogsMaxAge is how far back the logs can be filtered.
-	messageLogsMaxAge = 90 * 24 * time.Hour
-	// messageLogsContentPreview caps content in list rows; the detail endpoint
-	// returns the full text.
-	messageLogsContentPreview = 200
-	// messageLogsStatementTimeout bounds every logs query so an unusual filter
-	// combination fails fast instead of tying up the database.
-	messageLogsStatementTimeout = "5s"
-	// pgQueryCanceled is Postgres' SQLSTATE for a statement_timeout cancel.
-	pgQueryCanceled = "57014"
-)
+// messageLogsContentPreview caps content in list rows; the detail endpoint
+// returns the full text.
+const messageLogsContentPreview = 200
 
 var (
 	messageLogStatuses = map[string]bool{
@@ -116,53 +101,7 @@ func messageLogSelect(contentExpr string) string {
 		COALESCE(m.whats_app_message_id, '') AS whats_app_message_id`
 }
 
-// messageLogCursor identifies the row a page starts after. Rows are ordered by
-// (created_at, id) so rows sharing a timestamp page deterministically.
-type messageLogCursor struct {
-	CreatedAt time.Time
-	ID        uuid.UUID
-}
-
-func encodeMessageLogCursor(row messageLogRow) string {
-	raw := row.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + row.ID.String()
-	return base64.RawURLEncoding.EncodeToString([]byte(raw))
-}
-
-func decodeMessageLogCursor(s string) (*messageLogCursor, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return nil, err
-	}
-	ts, id, ok := strings.Cut(string(raw), "|")
-	if !ok {
-		return nil, errors.New("malformed cursor")
-	}
-	createdAt, err := time.Parse(time.RFC3339Nano, ts)
-	if err != nil {
-		return nil, err
-	}
-	rowID, err := uuid.Parse(id)
-	if err != nil {
-		return nil, err
-	}
-	return &messageLogCursor{CreatedAt: createdAt, ID: rowID}, nil
-}
-
-// parseMessageLogTime accepts a YYYY-MM-DD date (UTC) or an RFC3339 timestamp,
-// so the UI can send exact local-day boundaries. endOfRange extends a bare
-// date to the end of that day.
-func parseMessageLogTime(s string, endOfRange bool) (time.Time, bool) {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, true
-	}
-	if t, err := time.Parse(time.DateOnly, s); err == nil {
-		if endOfRange {
-			return endOfDay(t), true
-		}
-		return t, true
-	}
-	return time.Time{}, false
-}
+func messageLogKey(row messageLogRow) (time.Time, uuid.UUID) { return row.CreatedAt, row.ID }
 
 // normalizePhoneFilter strips everything but digits, matching how contact
 // phone numbers are stored ("+91 98765-43210" -> "919876543210").
@@ -186,17 +125,9 @@ func (a *App) ListMessageLogs(r *fastglue.Request) error {
 
 	args := r.RequestCtx.QueryArgs()
 
-	from, okFrom := parseMessageLogTime(string(args.Peek("from")), false)
-	to, okTo := parseMessageLogTime(string(args.Peek("to")), true)
-	if !okFrom || !okTo {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "from and to are required (YYYY-MM-DD or RFC3339)", nil, "")
-	}
-	if to.Before(from) {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "from must be before to", nil, "")
-	}
-	// Allow a day of slack so a "last 90 days" range in any timezone passes.
-	if from.Before(time.Now().Add(-messageLogsMaxAge - 24*time.Hour)) {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Message logs are available for the last 90 days only", nil, "")
+	from, to, errMsg := parseLogRange(args)
+	if errMsg != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
 	}
 
 	status := string(args.Peek("status"))
@@ -208,13 +139,10 @@ func (a *App) ListMessageLogs(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid status, direction or source filter", nil, "")
 	}
 
-	var cursor *messageLogCursor
-	if c := string(args.Peek("cursor")); c != "" {
-		if cursor, err = decodeMessageLogCursor(c); err != nil {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid cursor", nil, "")
-		}
+	page, err := parseLogPage(args)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid cursor", nil, "")
 	}
-	older := string(args.Peek("dir")) != "newer"
 
 	account := string(args.Peek("account"))
 	template := string(args.Peek("template"))
@@ -230,7 +158,7 @@ func (a *App) ListMessageLogs(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load message logs", nil, "")
 		}
 		if len(contactIDs) == 0 {
-			return r.SendEnvelope(messageLogsEnvelope([]MessageLogResponse{}, "", ""))
+			return r.SendEnvelope(logsEnvelope("logs", []MessageLogResponse{}, "", ""))
 		}
 	}
 
@@ -264,54 +192,14 @@ func (a *App) ListMessageLogs(r *fastglue.Request) error {
 			query = query.Where("m.contact_id IN ?", contactIDs)
 		}
 
-		switch {
-		case cursor == nil:
-			query = query.Order("m.created_at DESC, m.id DESC")
-		case older:
-			query = query.Where("(m.created_at, m.id) < (?, ?)", cursor.CreatedAt, cursor.ID).
-				Order("m.created_at DESC, m.id DESC")
-		default:
-			query = query.Where("(m.created_at, m.id) > (?, ?)", cursor.CreatedAt, cursor.ID).
-				Order("m.created_at ASC, m.id ASC")
-		}
-
-		return query.Limit(messageLogsPageSize + 1).Scan(&rows).Error
+		return page.apply(query, "m").Scan(&rows).Error
 	}); err != nil {
-		return a.sendMessageLogQueryError(r, err)
+		return a.sendLogQueryError(r, err, "message logs")
 	}
 
-	hasMore := len(rows) > messageLogsPageSize
-	if hasMore {
-		rows = rows[:messageLogsPageSize]
-	}
-	if !older {
-		// Newer pages are fetched oldest-first; always return newest-first.
-		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
-			rows[i], rows[j] = rows[j], rows[i]
-		}
-	}
-
-	var nextCursor, prevCursor string
-	if len(rows) > 0 {
-		first, last := rows[0], rows[len(rows)-1]
-		if older {
-			if hasMore {
-				nextCursor = encodeMessageLogCursor(last)
-			}
-			if cursor != nil {
-				prevCursor = encodeMessageLogCursor(first)
-			}
-		} else {
-			// We came from an older page, so older rows exist.
-			nextCursor = encodeMessageLogCursor(last)
-			if hasMore {
-				prevCursor = encodeMessageLogCursor(first)
-			}
-		}
-	}
-
+	rows, nextCursor, prevCursor := finishLogPage(page, rows, messageLogKey)
 	logs := a.messageLogRowsToResponse(orgID, rows)
-	return r.SendEnvelope(messageLogsEnvelope(logs, nextCursor, prevCursor))
+	return r.SendEnvelope(logsEnvelope("logs", logs, nextCursor, prevCursor))
 }
 
 // GetMessageLog returns a single message log entry with the full content and
@@ -343,29 +231,6 @@ func (a *App) GetMessageLog(r *fastglue.Request) error {
 	}
 
 	return r.SendEnvelope(a.messageLogRowsToResponse(orgID, rows)[0])
-}
-
-// withStatementTimeout runs fn in a transaction whose statements are cancelled
-// by Postgres after messageLogsStatementTimeout.
-func (a *App) withStatementTimeout(fn func(tx *gorm.DB) error) error {
-	return a.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("SET LOCAL statement_timeout = '" + messageLogsStatementTimeout + "'").Error; err != nil {
-			return err
-		}
-		return fn(tx)
-	})
-}
-
-// sendMessageLogQueryError maps a timed-out query to a 422 asking the caller to
-// narrow the filters, and anything else to a 500.
-func (a *App) sendMessageLogQueryError(r *fastglue.Request, err error) error {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == pgQueryCanceled {
-		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity,
-			"Query took too long. Narrow the date range or add filters.", nil, "")
-	}
-	a.Log.Error("Failed to load message logs", "error", err)
-	return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load message logs", nil, "")
 }
 
 // messageLogRowsToResponse converts scanned rows, resolving campaign names in
@@ -437,13 +302,4 @@ func (a *App) campaignNamesForLogs(orgID uuid.UUID, rows []messageLogRow) map[st
 		names[c.ID.String()] = c.Name
 	}
 	return names
-}
-
-func messageLogsEnvelope(logs []MessageLogResponse, nextCursor, prevCursor string) map[string]any {
-	return map[string]any{
-		"logs":        logs,
-		"next_cursor": nextCursor,
-		"prev_cursor": prevCursor,
-		"limit":       messageLogsPageSize,
-	}
 }

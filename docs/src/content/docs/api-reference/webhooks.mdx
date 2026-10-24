@@ -235,7 +235,8 @@ against the value after the `sha256=` prefix.
 
 A delivery is attempted at most **3 times** total (the initial attempt plus 2 retries), with a 2s
 and then 4s pause before each retry. A network error or any non-2xx response counts as a failure;
-after the third failure the delivery is dropped and logged.
+after the third failure the delivery is not retried again. Every delivery and attempt is
+recorded in the [webhook logs](/whatomate/api-reference/webhook-logs).
 
 Each dispatch sends to at most **10 webhooks concurrently**. Retries mean your endpoint can receive
 the same event more than once — make it idempotent.
