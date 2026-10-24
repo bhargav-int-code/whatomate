@@ -279,7 +279,8 @@
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "toggleMenu": "Toggle menu",
-    "messageLogs": "Message Logs"
+    "messageLogs": "Message Logs",
+    "webhookLogs": "Webhook Logs"
   },
   "userMenu": {
     "myAccount": "My Account",
@@ -1249,6 +1250,65 @@
       "sentBy": "Sent By",
       "whatsappMessageId": "WhatsApp Message ID",
       "openConversation": "Open Conversation"
+    }
+  },
+  "webhookLogs": {
+    "title": "Webhook Logs",
+    "description": "Every event sent to your webhooks, with each attempt and the exact request and response.",
+    "allDeliveries": "All Deliveries",
+    "allDeliveriesDesc": "Webhook deliveries from the last {days} days. Click a row for the request and response.",
+    "allWebhooks": "All Webhooks",
+    "allEvents": "All Events",
+    "allStatuses": "All Statuses",
+    "searchPlaceholder": "Reference ID or customer number",
+    "noLogs": "No webhook deliveries found.",
+    "noLogsDesc": "Try a different date range or clear the filters.",
+    "loadFailed": "Failed to load webhook logs",
+    "newer": "Newer",
+    "older": "Older",
+    "perPage": "{count} per page",
+    "attemptCount": "1 attempt | {count} attempts",
+    "recentDeliveries": "Recent Deliveries",
+    "viewAll": "View all",
+    "noRecentDeliveries": "No deliveries in the last {days} days.",
+    "columns": {
+      "time": "Time",
+      "webhook": "Webhook",
+      "event": "Event",
+      "status": "Status",
+      "attempts": "Attempts",
+      "reference": "Reference"
+    },
+    "statuses": {
+      "success": "Success",
+      "failed": "Failed",
+      "processing": "Processing"
+    },
+    "detail": {
+      "title": "Webhook Delivery",
+      "failureReason": "Failure Reason",
+      "customer": "Customer",
+      "completed": "Completed",
+      "attempts": "Attempts",
+      "attemptN": "Attempt {n}",
+      "noResponse": "No response",
+      "request": "Request",
+      "response": "Response",
+      "statusCode": "HTTP {code}",
+      "emptyBody": "Empty body",
+      "noResponseReceived": "No response was received."
+    },
+    "purge": {
+      "button": "Purge Logs",
+      "title": "Purge Webhook Logs",
+      "description": "Permanently delete webhook deliveries created before a date. Only logs older than {days} days can be purged.",
+      "before": "Delete deliveries before",
+      "willDelete": "{count} deliveries from {webhook} before {date} will be permanently deleted.",
+      "nothingToDelete": "No deliveries match. Nothing will be deleted.",
+      "check": "Check",
+      "confirm": "Delete {count} deliveries",
+      "started": "Purge started: {count} deliveries are being deleted",
+      "failed": "Failed to purge webhook logs"
     }
   },
   "customActions": {

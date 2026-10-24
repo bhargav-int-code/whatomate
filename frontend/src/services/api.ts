@@ -912,6 +912,66 @@ export const messageLogsService = {
   get: (id: string) => api.get<MessageLog>(`/message-logs/${id}`),
 }
 
+export type WebhookDeliveryStatus = 'processing' | 'success' | 'failed'
+
+export interface WebhookLog {
+  id: string
+  created_at: string
+  webhook_id: string
+  // Copied at delivery time, so it survives renames and deletes
+  webhook_name: string
+  event: string
+  // The message, contact or transfer the event is about
+  reference_id: string
+  contact_phone: string
+  status: WebhookDeliveryStatus
+  attempt_count: number
+  // 0 when no response was received
+  response_status: number
+  failure_reason: string
+  duration_ms: number
+  completed_at: string | null
+}
+
+export interface WebhookLogAttempt {
+  attempt: number
+  at: string
+  status_code: number
+  duration_ms: number
+  error: string
+}
+
+export interface WebhookLogDetail extends WebhookLog {
+  request: {
+    method: string
+    url: string
+    headers: Record<string, string>
+    body: unknown
+  }
+  response?: { status_code: number; body: string }
+  attempts: WebhookLogAttempt[]
+}
+
+export interface WebhookLogListParams {
+  from: string
+  to: string
+  webhook_id?: string
+  event?: string
+  status?: WebhookDeliveryStatus
+  search?: string
+  cursor?: string
+  dir?: 'older' | 'newer'
+}
+
+export const webhookLogsService = {
+  list: (params: WebhookLogListParams) =>
+    api.get<{ logs: WebhookLog[]; next_cursor: string; prev_cursor: string; limit: number }>('/webhook-logs', { params }),
+  get: (id: string) => api.get<WebhookLogDetail>(`/webhook-logs/${id}`),
+  // Without confirm, only reports how many deliveries match
+  purge: (data: { before: string; webhook_id?: string; confirm: boolean }) =>
+    api.post<{ matching: number; started: boolean }>('/webhook-logs/purge', data),
+}
+
 export const webhooksService = {
   list: (params?: { search?: string; page?: number; limit?: number }) =>
     api.get<{ webhooks: Webhook[]; available_events: WebhookEvent[]; total?: number }>('/webhooks', { params }),

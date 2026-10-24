@@ -26,6 +26,7 @@ import { useDateRange } from '@/composables/useDateRange'
 import { useAuthStore } from '@/stores/auth'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatLabel } from '@/lib/utils'
+import { LOG_RETENTION_DAYS, localDayBoundary, formatLogTime } from '@/lib/logs'
 import {
   ListChecks,
   ArrowDownLeft,
@@ -43,8 +44,6 @@ const authStore = useAuthStore()
 
 const STATUSES: MessageLogStatus[] = ['pending', 'sent', 'delivered', 'read', 'failed', 'received']
 const SOURCES: MessageLogSource[] = ['api', 'agent', 'chatbot', 'campaign', 'automation', 'phone_app', 'incoming', 'call']
-// The API only serves the last 90 days.
-const RETENTION_DAYS = 90
 // Template names are listed with the templates API's maximum page size, up to
 // this many pages.
 const TEMPLATE_PAGE_SIZE = 100
@@ -71,7 +70,7 @@ const {
   selectedRange, customDateRange, isDatePickerOpen,
   dateRange, formatDateRangeDisplay, applyCustomRange: baseApplyCustomRange,
 } = useDateRange({ defaultPreset: '7days' })
-const minDate = today(getLocalTimeZone()).subtract({ days: RETENTION_DAYS })
+const minDate = today(getLocalTimeZone()).subtract({ days: LOG_RETENTION_DAYS })
 
 const canOpenChat = authStore.hasPermission('chat')
 
@@ -88,14 +87,6 @@ const columns = computed<Column<MessageLog>[]>(() => [
   { key: 'source', label: t('messageLogs.columns.source') },
   { key: 'content', label: t('messageLogs.columns.content') },
 ])
-
-// The API reads a bare YYYY-MM-DD as a UTC day, which is up to a day off for
-// viewers outside UTC. Send the viewer's local day boundaries as timestamps.
-function localDayBoundary(day: string, endOfDay: boolean): string {
-  const [y, m, d] = day.split('-').map(Number)
-  const date = endOfDay ? new Date(y, m - 1, d, 23, 59, 59, 999) : new Date(y, m - 1, d)
-  return date.toISOString()
-}
 
 function buildParams(): MessageLogListParams {
   const { from, to } = dateRange.value
@@ -205,14 +196,6 @@ async function fetchTemplateNames() {
   templateNames.value = [...names].sort((a, b) => a.localeCompare(b))
 }
 
-function formatLogTime(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
-}
-
 function statusClass(status: MessageLogStatus): string {
   switch (status) {
     case 'read': return 'bg-blue-500/10 text-blue-500 border-blue-500/20'
@@ -293,7 +276,7 @@ onMounted(() => {
             <div class="flex flex-col gap-4">
               <div>
                 <CardTitle>{{ t('messageLogs.allMessages') }}</CardTitle>
-                <CardDescription>{{ t('messageLogs.allMessagesDesc', { days: RETENTION_DAYS }) }}</CardDescription>
+                <CardDescription>{{ t('messageLogs.allMessagesDesc', { days: LOG_RETENTION_DAYS }) }}</CardDescription>
               </div>
               <div class="flex items-center gap-2 flex-wrap">
                 <DateRangePicker

@@ -294,6 +294,12 @@ const router = createRouter({
           meta: { permission: 'message_logs' }
         },
         {
+          path: 'settings/webhook-logs',
+          name: 'webhook-logs',
+          component: () => import('@/views/settings/WebhookLogsView.vue'),
+          meta: { permission: 'webhook_logs' }
+        },
+        {
           path: 'settings/audit-logs',
           name: 'audit-logs',
           component: () => import('@/views/settings/AuditLogsView.vue'),
@@ -378,6 +384,7 @@ const navigationOrder = [
     { path: '/settings/roles', permission: 'roles' },
     { path: '/settings/api-keys', permission: 'api_keys' },
     { path: '/settings/webhooks', permission: 'webhooks' },
+    { path: '/settings/webhook-logs', permission: 'webhook_logs' },
     { path: '/settings/custom-actions', permission: 'custom_actions' },
     { path: '/settings/sso', permission: 'settings.sso' }
   ]}

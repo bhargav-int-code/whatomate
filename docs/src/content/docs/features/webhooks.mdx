@@ -92,6 +92,22 @@ Delivery is **asynchronous** — the API call that triggered the event returns i
 
 Use `POST /api/webhooks/{id}/test` to send a one-off `{"event":"test", ...}` payload synchronously and confirm your endpoint accepts and verifies it.
 
+## Webhook logs
+
+Every delivery is recorded, so you can see exactly what Whatomate sent and what your endpoint answered. Open **Settings → Webhook Logs**:
+
+- Each row is one event sent to one webhook, with its time, event, status, attempt count, last HTTP status, and the message, contact or transfer it was about. Failed rows show the reason underneath, e.g. `HTTP 503 Service Unavailable`, `Timed out waiting for a response` or `connection refused`.
+- Filter by date range (the last 90 days), webhook, event and status, or search by reference ID or customer number.
+- Click a row for the full delivery: every attempt with its time, HTTP status, error and duration; the request URL, headers as sent and the exact JSON body; and the first 2 KB of your endpoint's last response.
+
+Each webhook's page also lists its **Recent deliveries**, with a link to its full logs. Test sends appear there too, so after clicking **Test webhook** you can open the attempt and see why it failed.
+
+A delivery cut short by a server restart is marked failed with the reason *Interrupted*, instead of disappearing.
+
+### Purging logs
+
+Logs are kept until an admin purges them. Admins (the `webhook_logs:delete` permission) can click **Purge Logs**, pick a date and optionally one webhook, check how many deliveries match, then delete them. Only logs older than 7 days can be purged. Purges run in the background and are recorded in the audit log.
+
 ## SSRF protection
 
 Because webhook URLs are user-supplied, Whatomate guards against server-side request forgery on two levels:
