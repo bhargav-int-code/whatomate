@@ -724,6 +724,8 @@ func TestWorker_HandleRecipientJob_Success(t *testing.T) {
 	assert.Equal(t, models.MessageStatusSent, message.Status)
 	assert.Equal(t, models.DirectionOutgoing, message.Direction)
 	assert.Equal(t, models.MessageTypeTemplate, message.MessageType)
+	assert.Equal(t, models.MessageSourceCampaign, message.Source)
+	assert.NotNil(t, message.SentAt)
 	assert.Equal(t, "/media/documents/invoice.pdf", message.MediaURL)
 	assert.Equal(t, "application/pdf", message.MediaMimeType)
 	assert.Equal(t, "invoice.pdf", message.MediaFilename)

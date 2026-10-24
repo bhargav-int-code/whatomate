@@ -287,6 +287,13 @@ func getIndexes() []string {
 		// IVR flows
 		`CREATE INDEX IF NOT EXISTS idx_ivr_flows_org_active ON ivr_flows(organization_id, whatsapp_account, is_active)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ivr_flows_org_call_start ON ivr_flows(organization_id, whatsapp_account) WHERE is_call_start = true AND is_active = true AND deleted_at IS NULL`,
+		// Message logs (keyset pagination on created_at, id). CONCURRENTLY so
+		// building them on a large messages table doesn't block message writes
+		// during an upgrade.
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_org_created ON messages(organization_id, created_at DESC, id DESC)`,
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_org_account_created ON messages(organization_id, whats_app_account, created_at DESC, id DESC)`,
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_org_status_created ON messages(organization_id, status, created_at DESC, id DESC)`,
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_org_template_created ON messages(organization_id, template_name, created_at DESC, id DESC)`,
 	}
 }
 
@@ -405,12 +412,18 @@ func BackfillLastInboundAt(db *gorm.DB) error {
 	`).Error
 }
 
-// SeedPermissionsAndRoles seeds the default permissions and system roles
+// SeedPermissionsAndRoles seeds the default permissions. Permissions created by
+// this call (new in this release) are also granted to existing system roles
+// whose defaults include them, so admins on upgraded installs get new features
+// without editing roles by hand. Granting only at creation time means an admin
+// who later removes such a permission from a role doesn't get it back on the
+// next restart.
 func SeedPermissionsAndRoles(db *gorm.DB) error {
 	// Get all default permissions
 	defaultPerms := models.DefaultPermissions()
 
 	// Add any missing permissions
+	var created []models.Permission
 	for _, perm := range defaultPerms {
 		var existing models.Permission
 		if err := db.Where("resource = ? AND action = ?", perm.Resource, perm.Action).First(&existing).Error; err != nil {
@@ -419,6 +432,45 @@ func SeedPermissionsAndRoles(db *gorm.DB) error {
 			if err := db.Create(&perm).Error; err != nil {
 				return fmt.Errorf("failed to create permission %s:%s: %w", perm.Resource, perm.Action, err)
 			}
+			created = append(created, perm)
+		}
+	}
+
+	return grantNewPermissionsToSystemRoles(db, created)
+}
+
+// grantNewPermissionsToSystemRoles links freshly created permissions to every
+// existing system role whose default permission set includes them. On a fresh
+// install there are no roles yet, so this is a no-op and SeedSystemRolesForOrg
+// assigns the full defaults instead.
+func grantNewPermissionsToSystemRoles(db *gorm.DB, perms []models.Permission) error {
+	if len(perms) == 0 {
+		return nil
+	}
+
+	var systemRoles []models.CustomRole
+	if err := db.Where("is_system = ?", true).Find(&systemRoles).Error; err != nil {
+		return fmt.Errorf("failed to fetch system roles: %w", err)
+	}
+
+	rolePermissions := models.SystemRolePermissions()
+	for _, role := range systemRoles {
+		defaults := make(map[string]bool, len(rolePermissions[role.Name]))
+		for _, key := range rolePermissions[role.Name] {
+			defaults[key] = true
+		}
+
+		var toGrant []models.Permission
+		for _, p := range perms {
+			if defaults[p.Resource+":"+p.Action] {
+				toGrant = append(toGrant, p)
+			}
+		}
+		if len(toGrant) == 0 {
+			continue
+		}
+		if err := db.Model(&role).Association("Permissions").Append(toGrant); err != nil {
+			return fmt.Errorf("failed to grant new permissions to role %s: %w", role.Name, err)
 		}
 	}
 

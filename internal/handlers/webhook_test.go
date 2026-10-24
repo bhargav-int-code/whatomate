@@ -269,7 +269,7 @@ func TestUpdateMessageStatus_DeliveredUpdatesRecipient(t *testing.T) {
 	app := webhookTestApp(t)
 	_, msg, campaign, recipient := webhookTestData(t, app, models.MessageStatusSent)
 
-	app.updateMessageStatus(msg.WhatsAppMessageID, "delivered", "", nil)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "delivered"})
 
 	// Verify recipient status and delivered_at
 	var updated models.BulkMessageRecipient
@@ -288,7 +288,7 @@ func TestUpdateMessageStatus_ReadUpdatesRecipient(t *testing.T) {
 	app := webhookTestApp(t)
 	_, msg, campaign, recipient := webhookTestData(t, app, models.MessageStatusDelivered)
 
-	app.updateMessageStatus(msg.WhatsAppMessageID, "read", "", nil)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "read"})
 
 	// Verify recipient status and read_at
 	var updated models.BulkMessageRecipient
@@ -337,7 +337,7 @@ func TestUpdateMessageStatus_NonCampaignMessageIgnoresRecipient(t *testing.T) {
 	require.NoError(t, app.DB.Create(&msg).Error)
 
 	// Should update message status but not panic or fail
-	app.updateMessageStatus(waMsgID, "delivered", "", nil)
+	app.updateMessageStatus(WebhookStatus{ID: waMsgID, Status: "delivered"})
 
 	var updated models.Message
 	require.NoError(t, app.DB.First(&updated, msg.ID).Error)
@@ -349,7 +349,7 @@ func TestUpdateMessageStatus_StatusPriorityRespected(t *testing.T) {
 	_, msg, _, recipient := webhookTestData(t, app, models.MessageStatusRead)
 
 	// Attempt to downgrade from read -> delivered (should be ignored)
-	app.updateMessageStatus(msg.WhatsAppMessageID, "delivered", "", nil)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "delivered"})
 
 	var updated models.BulkMessageRecipient
 	require.NoError(t, app.DB.First(&updated, recipient.ID).Error)
@@ -364,7 +364,7 @@ func TestUpdateMessageStatus_FailedUpdatesMessage(t *testing.T) {
 	errors := []WebhookStatusError{
 		{Code: 131047, Title: "Re-engagement message", Message: "Message failed to send because more than 24 hours have passed"},
 	}
-	app.updateMessageStatus(msg.WhatsAppMessageID, "failed", "", errors)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", Errors: errors})
 
 	// Verify message status and error
 	var updatedMsg models.Message
@@ -454,7 +454,7 @@ func TestUpdateMessageStatus_FailedBroadcastsErrorMessageViaWebSocket(t *testing
 	errors := []WebhookStatusError{
 		{Code: 131047, Title: "Re-engagement message", Message: "This message was not delivered to maintain healthy ecosystem engagement."},
 	}
-	app.updateMessageStatus(waMsgID, "failed", "", errors)
+	app.updateMessageStatus(WebhookStatus{ID: waMsgID, Status: "failed", Errors: errors})
 
 	// Read from the client's send channel and verify the WS broadcast
 	select {
@@ -530,7 +530,7 @@ func TestUpdateMessageStatus_DeliveredBroadcastsViaWebSocket_NoErrorMessage(t *t
 	require.Equal(t, 1, hub.GetClientCount())
 
 	// Trigger a delivered status update (no errors)
-	app.updateMessageStatus(waMsgID, "delivered", "", nil)
+	app.updateMessageStatus(WebhookStatus{ID: waMsgID, Status: "delivered"})
 
 	// Read from the client's send channel and verify NO error_message
 	select {
@@ -771,7 +771,7 @@ func TestUpdateMessageStatus_FailedDispatchesMessageFailedWebhook(t *testing.T) 
 		{Code: 131047, Title: "Re-engagement message", Message: "Message failed to send because more than 24 hours have passed"},
 	}
 	statusErrors[0].ErrorData.Details = "Message failed to send because more than 24 hours have passed since the customer last replied"
-	app.updateMessageStatus(msg.WhatsAppMessageID, "failed", "", statusErrors)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", Errors: statusErrors})
 	app.WaitForBackgroundTasks()
 
 	payloads := delivered()
@@ -797,7 +797,7 @@ func TestUpdateMessageStatus_RepeatedFailedDoesNotRedispatch(t *testing.T) {
 	org, msg, _, _ := webhookTestData(t, app, models.MessageStatusFailed)
 	delivered := captureMessageFailedWebhooks(t, app, org.ID)
 
-	app.updateMessageStatus(msg.WhatsAppMessageID, "failed", "", []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}})
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", Errors: []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}}})
 	app.WaitForBackgroundTasks()
 
 	assert.Empty(t, delivered(), "a redelivered failed status must not fire message.failed again")
@@ -808,7 +808,7 @@ func TestUpdateMessageStatus_DeliveredDoesNotDispatchMessageFailedWebhook(t *tes
 	org, msg, _, _ := webhookTestData(t, app, models.MessageStatusSent)
 	delivered := captureMessageFailedWebhooks(t, app, org.ID)
 
-	app.updateMessageStatus(msg.WhatsAppMessageID, "delivered", "", nil)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "delivered"})
 	app.WaitForBackgroundTasks()
 
 	assert.Empty(t, delivered())
@@ -856,7 +856,7 @@ func TestUpdateMessageStatus_FailedWebhookPrefersMetaRecipientPhone(t *testing.T
 	metaPhone := "15550001111"
 	require.NotEqual(t, contact.PhoneNumber, metaPhone)
 
-	app.updateMessageStatus(msg.WhatsAppMessageID, "failed", metaPhone, []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}})
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", RecipientID: metaPhone, Errors: []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}}})
 	app.WaitForBackgroundTasks()
 
 	payloads := delivered()
@@ -876,7 +876,7 @@ func TestUpdateMessageStatus_FailedWebhookKeepsPhoneWhenContactDeleted(t *testin
 	require.NoError(t, app.DB.First(&contact, msg.ContactID).Error)
 	require.NoError(t, app.DB.Delete(&contact).Error)
 
-	app.updateMessageStatus(msg.WhatsAppMessageID, "failed", contact.PhoneNumber, []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}})
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", RecipientID: contact.PhoneNumber, Errors: []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}}})
 	app.WaitForBackgroundTasks()
 
 	payloads := delivered()

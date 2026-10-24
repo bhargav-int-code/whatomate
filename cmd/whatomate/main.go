@@ -209,6 +209,12 @@ func runServer(args []string) {
 		HTTPClient: httpClient,
 	}
 
+	// Migrations can grant new permissions to existing roles; drop cached
+	// permission sets so users see them now rather than after the cache TTL.
+	if *migrate {
+		app.InvalidateAllPermissionsCaches()
+	}
+
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
@@ -658,6 +664,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/contacts/{id}/notes", app.CreateConversationNote)
 	g.PUT("/api/contacts/{id}/notes/{note_id}", app.UpdateConversationNote)
 	g.DELETE("/api/contacts/{id}/notes/{note_id}", app.DeleteConversationNote)
+
+	// Message Logs
+	g.GET("/api/message-logs", app.ListMessageLogs)
+	g.GET("/api/message-logs/{id}", app.GetMessageLog)
 
 	// Media (serves media files for messages, auth-protected)
 	g.GET("/api/media/{message_id}", app.ServeMedia)

@@ -57,6 +57,7 @@ export default defineConfig({
             { label: 'Contacts', slug: 'api-reference/contacts' },
             { label: 'Tags', slug: 'api-reference/tags' },
             { label: 'Messages', slug: 'api-reference/messages' },
+            { label: 'Message Logs', slug: 'api-reference/message-logs' },
             { label: 'Templates', slug: 'api-reference/templates' },
             { label: 'Flows', slug: 'api-reference/flows' },
             { label: 'Campaigns', slug: 'api-reference/campaigns' },

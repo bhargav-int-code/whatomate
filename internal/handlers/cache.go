@@ -656,6 +656,15 @@ func (a *App) InvalidateRolePermissionsCache(roleID uuid.UUID) {
 	}
 }
 
+// InvalidateAllPermissionsCaches drops every cached user and role permission
+// set. Called at startup after migrations, which may grant newly added
+// permissions to existing roles behind the cache's back.
+func (a *App) InvalidateAllPermissionsCaches() {
+	ctx := context.Background()
+	a.deleteKeysByPattern(ctx, userPermissionsCachePrefix+"*")
+	a.deleteKeysByPattern(ctx, rolePermissionsCachePrefix+"*")
+}
+
 // InvalidateOrgPermissionsCache invalidates all permission caches for an organization
 func (a *App) InvalidateOrgPermissionsCache(orgID uuid.UUID) {
 	// Find all roles in this org

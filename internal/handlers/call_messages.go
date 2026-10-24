@@ -97,6 +97,7 @@ func (a *App) recordMissedCallMessage(callLog *models.CallLog, contact *models.C
 		Content:         "Missed call",
 		Status:          models.MessageStatusReceived,
 		Metadata:        metadata,
+		Source:          models.MessageSourceCall,
 	}
 	if err := a.DB.Create(&message).Error; err != nil {
 		a.Log.Error("Failed to record missed-call message",

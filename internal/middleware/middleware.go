@@ -24,6 +24,9 @@ const (
 	ContextKeyIsSuperAdmin   = "is_super_admin"
 	ContextKeyUser           = "user"
 	ContextKeyOrganization   = "organization"
+	// ContextKeyAPIKeyAuth is true when the request authenticated with an API
+	// key rather than a user's session (unset otherwise).
+	ContextKeyAPIKeyAuth = "api_key_auth"
 )
 
 // JWTClaims represents JWT claims
@@ -235,6 +238,7 @@ func validateAPIKey(r *fastglue.Request, key string, db *gorm.DB) bool {
 					r.RequestCtx.SetUserValue(ContextKeyRoleID, *apiKey.User.RoleID)
 				}
 				r.RequestCtx.SetUserValue(ContextKeyIsSuperAdmin, apiKey.User.IsSuperAdmin)
+				r.RequestCtx.SetUserValue(ContextKeyAPIKeyAuth, true)
 				return true
 			}
 		}
@@ -355,4 +359,10 @@ func GetOrganization(r *fastglue.Request) (*models.Organization, bool) {
 func IsSuperAdmin(r *fastglue.Request) bool {
 	isSuperAdmin, ok := r.RequestCtx.UserValue(ContextKeyIsSuperAdmin).(bool)
 	return ok && isSuperAdmin
+}
+
+// IsAPIKeyAuth reports whether the request authenticated with an API key
+func IsAPIKeyAuth(r *fastglue.Request) bool {
+	viaKey, ok := r.RequestCtx.UserValue(ContextKeyAPIKeyAuth).(bool)
+	return ok && viaKey
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -99,6 +100,9 @@ type MessageSendOptions struct {
 	// successful send. Used for chatbot replies so a bot-handled exchange
 	// doesn't leave an "unread" badge in the agent's contact list.
 	MarkIncomingRead bool
+
+	// Source is recorded on the message for the delivery logs
+	Source models.MessageSource
 }
 
 // DefaultSendOptions returns options suitable for agent UI sends
@@ -108,6 +112,7 @@ func DefaultSendOptions() MessageSendOptions {
 		DispatchWebhook:    true,
 		TrackSLA:           false,
 		Async:              true,
+		Source:             models.MessageSourceAgent,
 	}
 }
 
@@ -119,6 +124,7 @@ func ChatbotSendOptions() MessageSendOptions {
 		TrackSLA:           true,
 		Async:              false,
 		MarkIncomingRead:   true,
+		Source:             models.MessageSourceChatbot,
 	}
 }
 
@@ -129,6 +135,7 @@ func APISendOptions() MessageSendOptions {
 		DispatchWebhook:    true,
 		TrackSLA:           false,
 		Async:              true,
+		Source:             models.MessageSourceAPI,
 	}
 }
 
@@ -139,7 +146,20 @@ func SLASendOptions() MessageSendOptions {
 		DispatchWebhook:    false,
 		TrackSLA:           false,
 		Async:              false, // Sync to ensure message is sent before continuing
+		Source:             models.MessageSourceAutomation,
 	}
+}
+
+// userSendOptions returns DefaultSendOptions for a send made on behalf of the
+// requesting user, recording it as an API send when the request authenticated
+// with an API key rather than a UI session.
+func userSendOptions(r *fastglue.Request, userID uuid.UUID) MessageSendOptions {
+	opts := DefaultSendOptions()
+	opts.SentByUserID = &userID
+	if middleware.IsAPIKeyAuth(r) {
+		opts.Source = models.MessageSourceAPI
+	}
+	return opts
 }
 
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
@@ -285,6 +305,7 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 		MessageType:     req.Type,
 		Status:          models.MessageStatusPending,
 		SentByUserID:    opts.SentByUserID,
+		Source:          opts.Source,
 	}
 
 	// Set content based on message type
@@ -457,9 +478,12 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		return
 	}
 
+	// sent_at starts as the time Meta accepted the send; Meta's "sent" status
+	// callback replaces it with Meta's own timestamp.
 	a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
 		"status":               models.MessageStatusSent,
 		"whats_app_message_id": wamid,
+		"sent_at":              time.Now(),
 	})
 	a.Log.Info("Message sent", "message_id", msg.ID, "wa_message_id", wamid, "type", msg.MessageType)
 
@@ -1006,8 +1030,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		ButtonURLParams:     buttonParams,
 	}
 
-	opts := DefaultSendOptions()
-	opts.SentByUserID = &userID
+	opts := userSendOptions(r, userID)
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
