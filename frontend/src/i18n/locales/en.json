@@ -278,7 +278,8 @@
     "skipToMain": "Skip to main content",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
-    "toggleMenu": "Toggle menu"
+    "toggleMenu": "Toggle menu",
+    "messageLogs": "Message Logs"
   },
   "userMenu": {
     "myAccount": "My Account",
@@ -1181,6 +1182,74 @@
     "detailDesc": "Full change history for this resource.",
     "resourceType": "Resource Type",
     "viewResource": "View Resource"
+  },
+  "messageLogs": {
+    "title": "Message Logs",
+    "description": "Track every message sent and received, with delivery status and failure reasons.",
+    "allMessages": "All Messages",
+    "allMessagesDesc": "Incoming and outgoing messages from the last {days} days. Click a row for details.",
+    "allAccounts": "All Accounts",
+    "allStatuses": "All Statuses",
+    "allDirections": "All Directions",
+    "allSources": "All Sources",
+    "allTemplates": "All Templates",
+    "searchTemplate": "Search templates...",
+    "noTemplateFound": "No template found.",
+    "phonePlaceholder": "Customer number",
+    "noLogs": "No messages found.",
+    "noLogsDesc": "Try a different date range or clear the filters.",
+    "loadFailed": "Failed to load message logs",
+    "newer": "Newer",
+    "older": "Older",
+    "perPage": "{count} per page",
+    "columns": {
+      "time": "Time",
+      "customer": "Customer",
+      "direction": "Direction",
+      "status": "Status",
+      "template": "Template",
+      "source": "Source",
+      "content": "Content"
+    },
+    "directions": {
+      "incoming": "Incoming",
+      "outgoing": "Outgoing"
+    },
+    "statuses": {
+      "pending": "Pending",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "read": "Read",
+      "failed": "Failed",
+      "received": "Received"
+    },
+    "sources": {
+      "api": "API",
+      "agent": "Agent",
+      "chatbot": "Chatbot",
+      "campaign": "Campaign",
+      "automation": "Automation",
+      "phone_app": "Phone App",
+      "incoming": "Customer",
+      "call": "Call",
+      "unknown": "Unknown"
+    },
+    "detail": {
+      "title": "Message Details",
+      "timeline": "Delivery Timeline",
+      "created": "Created",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "read": "Read",
+      "failureReason": "Failure Reason",
+      "account": "WhatsApp Account",
+      "messageType": "Message Type",
+      "campaign": "Campaign",
+      "pricingCategory": "Pricing Category",
+      "sentBy": "Sent By",
+      "whatsappMessageId": "WhatsApp Message ID",
+      "openConversation": "Open Conversation"
+    }
   },
   "customActions": {
     "title": "Custom Actions",

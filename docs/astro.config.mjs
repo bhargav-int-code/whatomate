@@ -35,6 +35,7 @@ export default defineConfig({
             { label: 'Custom Actions', slug: 'features/custom-actions' },
             { label: 'Templates', slug: 'features/templates' },
             { label: 'Campaigns', slug: 'features/campaigns' },
+            { label: 'Message Logs', slug: 'features/message-logs' },
             { label: 'WhatsApp Flows', slug: 'features/whatsapp-flows' },
             { label: 'Product Catalogs', slug: 'features/catalogs' },
             { label: 'Calling', slug: 'features/calling' },

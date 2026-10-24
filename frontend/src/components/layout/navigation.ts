@@ -21,7 +21,8 @@ import {
   Tags,
   PhoneCall,
   PhoneForwarded,
-  ScrollText
+  ScrollText,
+  ListChecks
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -64,7 +65,7 @@ export const navigationSections: NavSection[] = [
   },
   {
     label: 'nav.sectionMessaging',
-    permissions: ['settings.chatbot', 'chatbot.keywords', 'flows.chatbot', 'chatbot.ai', 'transfers', 'campaigns', 'templates', 'flows.whatsapp'],
+    permissions: ['settings.chatbot', 'chatbot.keywords', 'flows.chatbot', 'chatbot.ai', 'transfers', 'campaigns', 'templates', 'flows.whatsapp', 'message_logs'],
     items: [
       {
         name: 'nav.chatbot',
@@ -97,6 +98,12 @@ export const navigationSections: NavSection[] = [
         path: '/flows',
         icon: Workflow,
         permission: 'flows.whatsapp'
+      },
+      {
+        name: 'nav.messageLogs',
+        path: '/message-logs',
+        icon: ListChecks,
+        permission: 'message_logs'
       },
     ]
   },
