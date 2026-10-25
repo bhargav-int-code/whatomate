@@ -59,6 +59,14 @@ Status updates need the **messages** field subscribed in your Meta app's WhatsAp
   A request rejected before a message is created, such as a template that doesn't exist or isn't approved, doesn't appear in the logs. The API returns that error directly to the caller.
 </Aside>
 
+## Exporting
+
+Exports run in the background so large ones don't slow anything down. A worker generates the file while you keep working, and you download it when it's ready. You can have one export in progress at a time, and your organization two.
+
+Each export contains exactly what the logs page shows for your filters, oldest first, with times in your timezone. Up to 100,000 messages download as a single CSV. Larger exports download as a zip of CSVs of up to 100,000 rows each, so every file opens in Excel, named after the dates they cover. A million messages take well under a minute.
+
+Files are kept for **7 days** and can only be downloaded by the person who requested them. See the [export API](/whatomate/api-reference/message-logs#export-message-logs) for the file's columns.
+
 ## Permissions
 
 Viewing logs requires the `message_logs:read` permission, which the **admin** and **manager** roles have by default. Grant it to other roles under **Settings → Roles**. When your organization masks phone numbers, numbers in the logs are masked too.

@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/messagelogs"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/valyala/fasthttp"
@@ -15,23 +15,6 @@ import (
 // messageLogsContentPreview caps content in list rows; the detail endpoint
 // returns the full text.
 const messageLogsContentPreview = 200
-
-var (
-	messageLogStatuses = map[string]bool{
-		string(models.MessageStatusPending): true, string(models.MessageStatusSent): true,
-		string(models.MessageStatusDelivered): true, string(models.MessageStatusRead): true,
-		string(models.MessageStatusFailed): true, string(models.MessageStatusReceived): true,
-	}
-	messageLogDirections = map[string]bool{
-		string(models.DirectionIncoming): true, string(models.DirectionOutgoing): true,
-	}
-	messageLogSources = map[string]bool{
-		string(models.MessageSourceAPI): true, string(models.MessageSourceAgent): true,
-		string(models.MessageSourceChatbot): true, string(models.MessageSourceCampaign): true,
-		string(models.MessageSourceAutomation): true, string(models.MessageSourcePhoneApp): true,
-		string(models.MessageSourceIncoming): true, string(models.MessageSourceCall): true,
-	}
-)
 
 // MessageLogResponse is one row of the message delivery logs
 type MessageLogResponse struct {
@@ -103,16 +86,27 @@ func messageLogSelect(contentExpr string) string {
 
 func messageLogKey(row messageLogRow) (time.Time, uuid.UUID) { return row.CreatedAt, row.ID }
 
-// normalizePhoneFilter strips everything but digits, matching how contact
-// phone numbers are stored ("+91 98765-43210" -> "919876543210").
-func normalizePhoneFilter(s string) string {
-	var b strings.Builder
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			b.WriteRune(c)
-		}
+// messageLogFiltersFromArgs reads the message log filters from query params.
+// On failure it returns a message suitable for a 400 response.
+func messageLogFiltersFromArgs(args *fasthttp.Args) (messagelogs.Filters, string) {
+	from, to, errMsg := parseLogRange(string(args.Peek("from")), string(args.Peek("to")))
+	if errMsg != "" {
+		return messagelogs.Filters{}, errMsg
 	}
-	return b.String()
+	filters := messagelogs.Filters{
+		From:      from,
+		To:        to,
+		Account:   string(args.Peek("account")),
+		Status:    string(args.Peek("status")),
+		Direction: string(args.Peek("direction")),
+		Source:    string(args.Peek("source")),
+		Template:  string(args.Peek("template")),
+		Phone:     messagelogs.NormalizePhone(string(args.Peek("phone"))),
+	}
+	if err := filters.Validate(); err != nil {
+		return filters, "Invalid status, direction or source filter"
+	}
+	return filters, ""
 }
 
 // ListMessageLogs returns one page of the organization's message delivery logs,
@@ -125,18 +119,9 @@ func (a *App) ListMessageLogs(r *fastglue.Request) error {
 
 	args := r.RequestCtx.QueryArgs()
 
-	from, to, errMsg := parseLogRange(args)
+	filters, errMsg := messageLogFiltersFromArgs(args)
 	if errMsg != "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
-	}
-
-	status := string(args.Peek("status"))
-	direction := string(args.Peek("direction"))
-	source := string(args.Peek("source"))
-	if (status != "" && !messageLogStatuses[status]) ||
-		(direction != "" && !messageLogDirections[direction]) ||
-		(source != "" && !messageLogSources[source]) {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid status, direction or source filter", nil, "")
 	}
 
 	page, err := parseLogPage(args)
@@ -144,16 +129,11 @@ func (a *App) ListMessageLogs(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid cursor", nil, "")
 	}
 
-	account := string(args.Peek("account"))
-	template := string(args.Peek("template"))
-
 	var contactIDs []uuid.UUID
-	if phone := normalizePhoneFilter(string(args.Peek("phone"))); phone != "" {
+	if filters.Phone != "" {
 		// Resolve the contact first so the messages scan uses the per-contact
-		// index. Unscoped: a deleted contact's messages are still logged.
-		if err := a.DB.Unscoped().Model(&models.Contact{}).
-			Where("organization_id = ? AND phone_number = ?", orgID, phone).
-			Pluck("id", &contactIDs).Error; err != nil {
+		// index.
+		if contactIDs, err = messagelogs.ResolveContacts(a.DB, orgID, filters.Phone); err != nil {
 			a.Log.Error("Failed to resolve message log phone filter", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load message logs", nil, "")
 		}
@@ -169,30 +149,8 @@ func (a *App) ListMessageLogs(r *fastglue.Request) error {
 			Select(messageLogSelect("LEFT(COALESCE(m.content, ''), ?)"), messageLogsContentPreview).
 			// No deleted_at filter on contacts: logs keep a deleted contact's
 			// name and number.
-			Joins("LEFT JOIN contacts c ON c.id = m.contact_id").
-			Where("m.organization_id = ? AND m.deleted_at IS NULL", orgID).
-			Where("m.created_at >= ? AND m.created_at <= ?", from, to)
-
-		if account != "" {
-			query = query.Where("m.whats_app_account = ?", account)
-		}
-		if status != "" {
-			query = query.Where("m.status = ?", status)
-		}
-		if direction != "" {
-			query = query.Where("m.direction = ?", direction)
-		}
-		if source != "" {
-			query = query.Where("m.source = ?", source)
-		}
-		if template != "" {
-			query = query.Where("m.template_name = ?", template)
-		}
-		if len(contactIDs) > 0 {
-			query = query.Where("m.contact_id IN ?", contactIDs)
-		}
-
-		return page.apply(query, "m").Scan(&rows).Error
+			Joins("LEFT JOIN contacts c ON c.id = m.contact_id")
+		return page.apply(filters.Apply(query, orgID, contactIDs), "m").Scan(&rows).Error
 	}); err != nil {
 		return a.sendLogQueryError(r, err, "message logs")
 	}

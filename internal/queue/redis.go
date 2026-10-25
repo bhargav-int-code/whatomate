@@ -23,6 +23,14 @@ const (
 
 	// ClaimMinIdleTime is the minimum idle time before claiming a pending message
 	ClaimMinIdleTime = 5 * time.Minute
+
+	// ExportStreamName is the Redis stream for export jobs. It is separate from
+	// the campaigns stream so a long export never waits behind, or holds up, a
+	// campaign's recipient jobs.
+	ExportStreamName = "whatomate:exports"
+
+	// ExportConsumerGroup is the consumer group name for export workers
+	ExportConsumerGroup = "export-workers"
 )
 
 // RedisQueue implements the Queue interface using Redis Streams
@@ -102,6 +110,25 @@ func (q *RedisQueue) EnqueueRecipients(ctx context.Context, jobs []*RecipientJob
 	return nil
 }
 
+// EnqueueExport adds an export job to the exports stream
+func (q *RedisQueue) EnqueueExport(ctx context.Context, job *ExportJob) error {
+	payload, err := json.Marshal(job)
+	if err != nil {
+		return fmt.Errorf("failed to marshal export job: %w", err)
+	}
+
+	if err := q.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: ExportStreamName,
+		Values: map[string]any{
+			"type":    string(JobTypeExport),
+			"payload": string(payload),
+		},
+	}).Err(); err != nil {
+		return fmt.Errorf("failed to enqueue export job: %w", err)
+	}
+	return nil
+}
+
 // Close closes the queue connection
 func (q *RedisQueue) Close() error {
 	return nil // Redis client is managed externally
@@ -112,10 +139,21 @@ type RedisConsumer struct {
 	client     *redis.Client
 	log        logf.Logger
 	consumerID string
+	stream     string
+	group      string
 }
 
-// NewRedisConsumer creates a new Redis consumer
+// NewRedisConsumer creates a new Redis consumer for the campaigns stream
 func NewRedisConsumer(client *redis.Client, log logf.Logger) (*RedisConsumer, error) {
+	return newRedisConsumer(client, log, StreamName, ConsumerGroup)
+}
+
+// NewRedisExportConsumer creates a new Redis consumer for the exports stream
+func NewRedisExportConsumer(client *redis.Client, log logf.Logger) (*RedisConsumer, error) {
+	return newRedisConsumer(client, log, ExportStreamName, ExportConsumerGroup)
+}
+
+func newRedisConsumer(client *redis.Client, log logf.Logger, stream, group string) (*RedisConsumer, error) {
 	// Generate unique consumer ID
 	hostname, _ := os.Hostname()
 	consumerID := fmt.Sprintf("worker-%s-%d", hostname, os.Getpid())
@@ -124,16 +162,18 @@ func NewRedisConsumer(client *redis.Client, log logf.Logger) (*RedisConsumer, er
 		client:     client,
 		log:        log,
 		consumerID: consumerID,
+		stream:     stream,
+		group:      group,
 	}
 
 	// Create consumer group if it doesn't exist
 	ctx := context.Background()
-	err := client.XGroupCreateMkStream(ctx, StreamName, ConsumerGroup, "0").Err()
+	err := client.XGroupCreateMkStream(ctx, stream, group, "0").Err()
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		return nil, fmt.Errorf("failed to create consumer group: %w", err)
 	}
 
-	log.Info("Redis consumer initialized", "consumer_id", consumerID)
+	log.Info("Redis consumer initialized", "consumer_id", consumerID, "stream", stream)
 	return consumer, nil
 }
 
@@ -156,9 +196,9 @@ func (c *RedisConsumer) Consume(ctx context.Context, handler JobHandler) error {
 
 		// Read new messages from the stream
 		streams, err := c.client.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    ConsumerGroup,
+			Group:    c.group,
 			Consumer: c.consumerID,
-			Streams:  []string{StreamName, ">"},
+			Streams:  []string{c.stream, ">"},
 			Count:    1,
 			Block:    BlockTimeout,
 		}).Result()
@@ -185,7 +225,7 @@ func (c *RedisConsumer) Consume(ctx context.Context, handler JobHandler) error {
 				}
 
 				// Acknowledge the message
-				if err := c.client.XAck(ctx, StreamName, ConsumerGroup, msg.ID).Err(); err != nil {
+				if err := c.client.XAck(ctx, c.stream, c.group, msg.ID).Err(); err != nil {
 					c.log.Error("Failed to ACK message", "error", err, "message_id", msg.ID)
 				}
 			}
@@ -197,8 +237,8 @@ func (c *RedisConsumer) Consume(ctx context.Context, handler JobHandler) error {
 func (c *RedisConsumer) claimPendingMessages(ctx context.Context, handler JobHandler) error {
 	// Get pending messages that have been idle for too long
 	pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{
-		Stream: StreamName,
-		Group:  ConsumerGroup,
+		Stream: c.stream,
+		Group:  c.group,
 		Start:  "-",
 		End:    "+",
 		Count:  100,
@@ -219,8 +259,8 @@ func (c *RedisConsumer) claimPendingMessages(ctx context.Context, handler JobHan
 	for _, p := range pending {
 		// Claim the message
 		messages, err := c.client.XClaim(ctx, &redis.XClaimArgs{
-			Stream:   StreamName,
-			Group:    ConsumerGroup,
+			Stream:   c.stream,
+			Group:    c.group,
 			Consumer: c.consumerID,
 			MinIdle:  ClaimMinIdleTime,
 			Messages: []string{p.ID},
@@ -238,7 +278,7 @@ func (c *RedisConsumer) claimPendingMessages(ctx context.Context, handler JobHan
 			}
 
 			// Acknowledge the message
-			if err := c.client.XAck(ctx, StreamName, ConsumerGroup, msg.ID).Err(); err != nil {
+			if err := c.client.XAck(ctx, c.stream, c.group, msg.ID).Err(); err != nil {
 				c.log.Error("Failed to ACK claimed message", "error", err, "message_id", msg.ID)
 			}
 		}
@@ -267,6 +307,18 @@ func (c *RedisConsumer) processMessage(ctx context.Context, msg redis.XMessage, 
 		}
 		c.log.Debug("Processing recipient job", "campaign_id", job.CampaignID, "recipient_id", job.RecipientID, "message_id", msg.ID)
 		return handler.HandleRecipientJob(ctx, &job)
+
+	case JobTypeExport:
+		exportHandler, ok := handler.(ExportJobHandler)
+		if !ok {
+			return fmt.Errorf("handler does not process export jobs")
+		}
+		var job ExportJob
+		if err := json.Unmarshal([]byte(payload), &job); err != nil {
+			return fmt.Errorf("failed to unmarshal export job: %w", err)
+		}
+		c.log.Debug("Processing export job", "export_id", job.ExportID, "message_id", msg.ID)
+		return exportHandler.HandleExportJob(ctx, &job)
 
 	default:
 		return fmt.Errorf("unknown job type: %s", jobType)

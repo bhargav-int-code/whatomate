@@ -67,6 +67,7 @@ func GetMigrationModels() []MigrationModel {
 		{"SSOProvider", &models.SSOProvider{}},
 		{"Webhook", &models.Webhook{}},
 		{"WebhookDelivery", &models.WebhookDelivery{}},
+		{"ExportJob", &models.ExportJob{}},
 		{"CustomAction", &models.CustomAction{}},
 		{"WhatsAppAccount", &models.WhatsAppAccount{}},
 		{"Contact", &models.Contact{}},
@@ -303,6 +304,10 @@ func getIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_org_phone ON webhook_deliveries(organization_id, contact_phone)`,
 		// Partial index so the stale-delivery sweep doesn't scan finished rows.
 		`CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_processing ON webhook_deliveries(created_at) WHERE status = 'processing'`,
+		// Export jobs
+		`CREATE INDEX IF NOT EXISTS idx_export_jobs_user_created ON export_jobs(organization_id, user_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_export_jobs_active ON export_jobs(organization_id, status) WHERE status IN ('queued', 'processing')`,
+		`CREATE INDEX IF NOT EXISTS idx_export_jobs_expiry ON export_jobs(expires_at) WHERE status = 'completed'`,
 	}
 }
 

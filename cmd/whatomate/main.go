@@ -288,9 +288,14 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
-	// Close out webhook deliveries left "processing" by a restart
+	// Close out webhook deliveries left "processing" by a restart, delete
+	// expired export files and relay workers' export updates to users
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	go app.StartWebhookDeliverySweeper(sweepCtx)
+	go app.StartExportSweeper(sweepCtx)
+	if err := app.StartExportUpdatesSubscriber(sweepCtx); err != nil {
+		lo.Error("Failed to start export updates subscriber", "error", err)
+	}
 
 	// Start embedded workers
 	var workers []*worker.Worker
@@ -672,7 +677,13 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 
 	// Message Logs
 	g.GET("/api/message-logs", app.ListMessageLogs)
+	g.POST("/api/message-logs/exports", app.RequestMessageLogExport)
 	g.GET("/api/message-logs/{id}", app.GetMessageLog)
+
+	// Exports (the requesting user's background exports)
+	g.GET("/api/exports", app.ListExports)
+	g.GET("/api/exports/{id}/download", app.DownloadExport)
+	g.DELETE("/api/exports/{id}", app.DeleteExport)
 
 	// Media (serves media files for messages, auth-protected)
 	g.GET("/api/media/{message_id}", app.ServeMedia)

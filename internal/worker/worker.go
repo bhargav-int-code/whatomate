@@ -20,13 +20,16 @@ import (
 
 // Worker processes jobs from the queue
 type Worker struct {
-	Config    *config.Config
-	DB        *gorm.DB
-	Redis     *redis.Client
-	Log       logf.Logger
-	WhatsApp  *whatsapp.Client
-	Consumer  *queue.RedisConsumer
-	Publisher *queue.Publisher
+	Config   *config.Config
+	DB       *gorm.DB
+	Redis    *redis.Client
+	Log      logf.Logger
+	WhatsApp *whatsapp.Client
+	Consumer *queue.RedisConsumer
+	// ExportConsumer reads the exports stream, so exports and campaign sends
+	// never wait on each other.
+	ExportConsumer *queue.RedisConsumer
+	Publisher      *queue.Publisher
 }
 
 // Ensure Worker implements JobHandler interface
@@ -39,16 +42,22 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 		return nil, fmt.Errorf("failed to create consumer: %w", err)
 	}
 
+	exportConsumer, err := queue.NewRedisExportConsumer(rdb, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create export consumer: %w", err)
+	}
+
 	publisher := queue.NewPublisher(rdb, log)
 
 	return &Worker{
-		Config:    cfg,
-		DB:        db,
-		Redis:     rdb,
-		Log:       log,
-		WhatsApp:  whatsapp.New(log),
-		Consumer:  consumer,
-		Publisher: publisher,
+		Config:         cfg,
+		DB:             db,
+		Redis:          rdb,
+		Log:            log,
+		WhatsApp:       whatsapp.New(log),
+		Consumer:       consumer,
+		ExportConsumer: exportConsumer,
+		Publisher:      publisher,
 	}, nil
 }
 
@@ -56,7 +65,18 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 func (w *Worker) Run(ctx context.Context) error {
 	w.Log.Info("Worker starting")
 
+	// Exports run alongside campaign sends, one at a time per worker.
+	exportErr := make(chan error, 1)
+	if w.ExportConsumer != nil {
+		go func() { exportErr <- w.ExportConsumer.Consume(ctx, w) }()
+	} else {
+		exportErr <- nil
+	}
+
 	err := w.Consumer.Consume(ctx, w)
+	if eerr := <-exportErr; err == nil {
+		err = eerr
+	}
 	if err != nil && ctx.Err() == nil {
 		return fmt.Errorf("consumer error: %w", err)
 	}

@@ -91,6 +91,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.SSOProvider{},
 		&models.Webhook{},
 		&models.WebhookDelivery{},
+		&models.ExportJob{},
 		&models.CustomAction{},
 		&models.UserAvailabilityLog{},
 		// WhatsApp models
@@ -172,6 +173,7 @@ func cleanupTables(db *gorm.DB) {
 		"teams",
 		"api_keys",
 		"sso_providers",
+		"export_jobs",
 		"webhook_deliveries",
 		"webhooks",
 		"custom_actions",
@@ -217,6 +219,7 @@ func TruncateTables(db *gorm.DB) {
 		"teams",
 		"api_keys",
 		"sso_providers",
+		"export_jobs",
 		"webhook_deliveries",
 		"webhooks",
 		"custom_actions",

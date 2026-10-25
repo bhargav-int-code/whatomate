@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/messagelogs"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -290,7 +291,7 @@ func (a *App) ListWebhookLogs(r *fastglue.Request) error {
 	}
 
 	args := r.RequestCtx.QueryArgs()
-	from, to, errMsg := parseLogRange(args)
+	from, to, errMsg := parseLogRange(string(args.Peek("from")), string(args.Peek("to")))
 	if errMsg != "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
 	}
@@ -328,7 +329,7 @@ func (a *App) ListWebhookLogs(r *fastglue.Request) error {
 		if search != "" {
 			// Search matches the referenced message/contact/transfer ID, or the
 			// customer's number in any format.
-			if phone := normalizePhoneFilter(search); phone != "" {
+			if phone := messagelogs.NormalizePhone(search); phone != "" {
 				query = query.Where("(d.reference_id = ? OR d.contact_phone = ?)", search, phone)
 			} else {
 				query = query.Where("d.reference_id = ?", search)

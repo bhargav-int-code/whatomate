@@ -240,6 +240,7 @@ func DefaultPermissions() []Permission {
 
 		// Message Logs
 		{Resource: ResourceMessageLogs, Action: ActionRead, Description: "View message delivery logs"},
+		{Resource: ResourceMessageLogs, Action: ActionExport, Description: "Export message delivery logs"},
 
 		// Webhook Logs
 		{Resource: ResourceWebhookLogs, Action: ActionRead, Description: "View webhook delivery logs"},
@@ -297,7 +298,7 @@ func SystemRolePermissions() map[string][]string {
 		"call_transfers:read", "call_transfers:write",
 		"outgoing_calls:read", "outgoing_calls:write",
 		// Message Logs
-		"message_logs:read",
+		"message_logs:read", "message_logs:export",
 		// Webhook Logs (purge is admin-only)
 		"webhook_logs:read",
 	}

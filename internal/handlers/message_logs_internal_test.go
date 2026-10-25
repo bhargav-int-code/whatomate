@@ -154,11 +154,6 @@ func TestMessageLogCursor_RoundTrip(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestNormalizePhoneFilter(t *testing.T) {
-	assert.Equal(t, "919876543210", normalizePhoneFilter("+91 98765-43210"))
-	assert.Equal(t, "", normalizePhoneFilter("abc"))
-}
-
 func TestWithStatementTimeout_CancelsSlowQueriesWith422(t *testing.T) {
 	app := webhookTestApp(t)
 

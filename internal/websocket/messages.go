@@ -63,6 +63,9 @@ const (
 
 	// Call permission types
 	TypeCallPermissionUpdate = "call_permission_update"
+
+	// Export types
+	TypeExportUpdate = "export_update"
 )
 
 // BroadcastMessage represents a message to be broadcast to clients

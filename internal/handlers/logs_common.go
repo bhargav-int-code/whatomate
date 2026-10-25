@@ -77,11 +77,11 @@ func parseLogTime(s string, endOfRange bool) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// parseLogRange reads the required from/to query params. On failure it returns
-// a message suitable for a 400 response.
-func parseLogRange(args *fasthttp.Args) (from, to time.Time, errMsg string) {
-	from, okFrom := parseLogTime(string(args.Peek("from")), false)
-	to, okTo := parseLogTime(string(args.Peek("to")), true)
+// parseLogRange parses the required from/to values (query params or a request
+// body). On failure it returns a message suitable for a 400 response.
+func parseLogRange(fromStr, toStr string) (from, to time.Time, errMsg string) {
+	from, okFrom := parseLogTime(fromStr, false)
+	to, okTo := parseLogTime(toStr, true)
 	if !okFrom || !okTo {
 		return from, to, "from and to are required (YYYY-MM-DD or RFC3339)"
 	}
