@@ -198,6 +198,14 @@ func TestDownloadExport(t *testing.T) {
 	pending := f.storeExport(t, f.admin.ID, models.ExportStatusProcessing, "", nil)
 	assert.Equal(t, fasthttp.StatusConflict, f.download(t, f.admin.ID, pending.ID).Response.StatusCode())
 
+	// The requester can download an export from another of their
+	// organizations: browser downloads don't carry the org-switch header.
+	otherOrg := testutil.CreateTestOrganization(t, f.app.DB)
+	elsewhere := f.storeExport(t, f.admin.ID, models.ExportStatusCompleted, "message-logs_b.csv", func(j *models.ExportJob) {
+		j.OrganizationID = otherOrg.ID
+	})
+	assert.Equal(t, fasthttp.StatusOK, f.download(t, f.admin.ID, elsewhere.ID).Response.StatusCode())
+
 	escape := f.storeExport(t, f.admin.ID, models.ExportStatusCompleted, "", func(j *models.ExportJob) {
 		j.FilePath, j.FileName = "../../etc/passwd", "x.csv"
 	})

@@ -209,8 +209,11 @@ func (a *App) ListExports(r *fastglue.Request) error {
 }
 
 // findOwnExport loads an export belonging to the requesting user, sending a
-// 404 otherwise. Exports are private to whoever requested them.
-func (a *App) findOwnExport(r *fastglue.Request) (*models.ExportJob, error) {
+// 404 otherwise. Exports are private to whoever requested them. With anyOrg,
+// the export may belong to any of the user's organizations: downloads are
+// plain browser navigations, which can't send the X-Organization-ID header a
+// user who switched organizations relies on, and ownership alone is enough.
+func (a *App) findOwnExport(r *fastglue.Request, anyOrg bool) (*models.ExportJob, error) {
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		_ = r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -220,8 +223,12 @@ func (a *App) findOwnExport(r *fastglue.Request) (*models.ExportJob, error) {
 	if err != nil {
 		return nil, err
 	}
+	query := a.DB.Where("id = ? AND user_id = ?", id, userID)
+	if !anyOrg {
+		query = query.Where("organization_id = ?", orgID)
+	}
 	var job models.ExportJob
-	if err := a.DB.Where("id = ? AND organization_id = ? AND user_id = ?", id, orgID, userID).First(&job).Error; err != nil {
+	if err := query.First(&job).Error; err != nil {
 		_ = r.SendErrorEnvelope(fasthttp.StatusNotFound, "Export not found", nil, "")
 		return nil, errEnvelopeSent
 	}
@@ -251,7 +258,7 @@ func (a *App) exportFilePath(job *models.ExportJob) (string, error) {
 
 // DownloadExport streams a completed export file to its requester.
 func (a *App) DownloadExport(r *fastglue.Request) error {
-	job, err := a.findOwnExport(r)
+	job, err := a.findOwnExport(r, true)
 	if err != nil {
 		return nil
 	}
@@ -280,7 +287,7 @@ func (a *App) DownloadExport(r *fastglue.Request) error {
 
 // DeleteExport removes a finished export and its file.
 func (a *App) DeleteExport(r *fastglue.Request) error {
-	job, err := a.findOwnExport(r)
+	job, err := a.findOwnExport(r, false)
 	if err != nil {
 		return nil
 	}

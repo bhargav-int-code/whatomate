@@ -294,6 +294,12 @@ const router = createRouter({
           meta: { permission: 'message_logs' }
         },
         {
+          path: 'downloads',
+          name: 'downloads',
+          component: () => import('@/views/downloads/DownloadsView.vue'),
+          meta: { permission: 'message_logs' }
+        },
+        {
           path: 'settings/webhook-logs',
           name: 'webhook-logs',
           component: () => import('@/views/settings/WebhookLogsView.vue'),
@@ -367,6 +373,7 @@ const navigationOrder = [
   { path: '/flows', permission: 'flows.whatsapp' },
   { path: '/campaigns', permission: 'campaigns' },
   { path: '/message-logs', permission: 'message_logs' },
+  { path: '/downloads', permission: 'message_logs' },
   { path: '/calling/logs', permission: 'call_logs', childPaths: [
     { path: '/calling/logs', permission: 'call_logs' },
     { path: '/calling/ivr-flows', permission: 'ivr_flows' },

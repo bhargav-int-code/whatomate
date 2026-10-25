@@ -280,7 +280,8 @@
     "collapseSidebar": "Collapse sidebar",
     "toggleMenu": "Toggle menu",
     "messageLogs": "Message Logs",
-    "webhookLogs": "Webhook Logs"
+    "webhookLogs": "Webhook Logs",
+    "downloads": "Downloads"
   },
   "userMenu": {
     "myAccount": "My Account",
@@ -1309,6 +1310,45 @@
       "confirm": "Delete {count} deliveries",
       "started": "Purge started: {count} deliveries are being deleted",
       "failed": "Failed to purge webhook logs"
+    }
+  },
+  "exports": {
+    "title": "Downloads",
+    "description": "Exports you've requested. Files are kept for 7 days.",
+    "yourExports": "Your Exports",
+    "yourExportsDesc": "Exports run in the background; this page updates when they finish.",
+    "empty": "No exports yet.",
+    "emptyDesc": "Use Export on the Message Logs page to download logs as CSV.",
+    "loadFailed": "Failed to load exports",
+    "deleteFailed": "Failed to delete export",
+    "deleteTitle": "Delete Export",
+    "deleteDescription": "The file will be deleted. You can request the export again.",
+    "exportButton": "Export",
+    "startedTitle": "Export started",
+    "startedDescription": "We'll let you know when the file is ready to download.",
+    "startFailed": "Failed to start export",
+    "readyTitle": "Export ready",
+    "readyDescription": "{file} ({count} messages) is ready to download.",
+    "failedTitle": "Export failed",
+    "viewDownloads": "View Downloads",
+    "columns": {
+      "file": "File",
+      "filters": "Filters",
+      "rows": "Rows",
+      "size": "Size",
+      "status": "Status",
+      "requested": "Requested",
+      "expires": "Expires"
+    },
+    "statuses": {
+      "queued": "Queued",
+      "processing": "Processing",
+      "completed": "Ready",
+      "failed": "Failed",
+      "expired": "Expired"
+    },
+    "types": {
+      "message_logs": "Message logs"
     }
   },
   "customActions": {

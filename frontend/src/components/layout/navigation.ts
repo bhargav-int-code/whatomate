@@ -23,7 +23,8 @@ import {
   PhoneForwarded,
   ScrollText,
   ListChecks,
-  Activity
+  Activity,
+  FolderDown
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -104,6 +105,12 @@ export const navigationSections: NavSection[] = [
         name: 'nav.messageLogs',
         path: '/message-logs',
         icon: ListChecks,
+        permission: 'message_logs'
+      },
+      {
+        name: 'nav.downloads',
+        path: '/downloads',
+        icon: FolderDown,
         permission: 'message_logs'
       },
     ]

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import { today, getLocalTimeZone } from '@internationalized/date'
@@ -37,6 +38,7 @@ import {
   ChevronRight,
   Copy,
   MessageSquare,
+  Download,
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
@@ -73,6 +75,27 @@ const {
 const minDate = today(getLocalTimeZone()).subtract({ days: LOG_RETENTION_DAYS })
 
 const canOpenChat = authStore.hasPermission('chat')
+const canExport = authStore.hasPermission('message_logs', 'export')
+const router = useRouter()
+const isExporting = ref(false)
+
+// Queues a background export of exactly what the filters show. The file's
+// times are written in the viewer's timezone.
+async function requestExport() {
+  isExporting.value = true
+  try {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    await messageLogsService.export({ ...buildParams(), timezone })
+    toast.success(t('exports.startedTitle'), {
+      description: t('exports.startedDescription'),
+      action: { label: t('exports.viewDownloads'), onClick: () => router.push('/downloads') },
+    })
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('exports.startFailed')))
+  } finally {
+    isExporting.value = false
+  }
+}
 
 const hasActiveFilters = computed(() =>
   filterAccount.value !== 'all' || filterStatus.value !== 'all' || filterDirection.value !== 'all' ||
@@ -267,7 +290,14 @@ onMounted(() => {
       :description="t('messageLogs.description')"
       :icon="ListChecks"
       icon-gradient="bg-gradient-to-br from-sky-500 to-indigo-600 shadow-sky-500/20"
-    />
+    >
+      <template v-if="canExport" #actions>
+        <Button variant="outline" size="sm" :loading="isExporting" @click="requestExport">
+          <Download class="h-4 w-4 mr-1" />
+          {{ t('exports.exportButton') }}
+        </Button>
+      </template>
+    </PageHeader>
 
     <ScrollArea class="flex-1">
       <div class="p-6">

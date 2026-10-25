@@ -910,6 +910,44 @@ export const messageLogsService = {
   list: (params: MessageLogListParams) =>
     api.get<{ logs: MessageLog[]; next_cursor: string; prev_cursor: string; limit: number }>('/message-logs', { params }),
   get: (id: string) => api.get<MessageLog>(`/message-logs/${id}`),
+  // Queues a background export of the logs matching the filters
+  export: (params: Omit<MessageLogListParams, 'cursor' | 'dir'> & { timezone: string }) =>
+    api.post<ExportJob>('/message-logs/exports', params),
+}
+
+export type ExportStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'expired'
+
+export interface ExportJob {
+  id: string
+  type: 'message_logs'
+  status: ExportStatus
+  filters: Record<string, string>
+  timezone: string
+  row_count: number
+  file_size: number
+  file_name: string
+  error?: string
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  expires_at: string | null
+}
+
+// Sent over WebSocket when an export finishes
+export interface ExportUpdate {
+  export_id: string
+  status: 'completed' | 'failed'
+  file_name?: string
+  row_count: number
+  error?: string
+}
+
+export const exportsService = {
+  list: () => api.get<{ exports: ExportJob[] }>('/exports'),
+  delete: (id: string) => api.delete(`/exports/${id}`),
+  // Downloads are plain navigations so the browser streams large files to
+  // disk instead of buffering them in memory.
+  downloadUrl: (id: string) => `${API_BASE_URL}/exports/${id}/download`,
 }
 
 export type WebhookDeliveryStatus = 'processing' | 'success' | 'failed'
