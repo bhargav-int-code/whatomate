@@ -23,10 +23,11 @@ var (
 		string(models.DirectionIncoming): true, string(models.DirectionOutgoing): true,
 	}
 	validSources = map[string]bool{
-		string(models.MessageSourceAPI): true, string(models.MessageSourceAgent): true,
-		string(models.MessageSourceChatbot): true, string(models.MessageSourceCampaign): true,
-		string(models.MessageSourceAutomation): true, string(models.MessageSourcePhoneApp): true,
-		string(models.MessageSourceIncoming): true, string(models.MessageSourceCall): true,
+		string(models.MessageSourceAPI): true, string(models.MessageSourceMCP): true,
+		string(models.MessageSourceAgent): true, string(models.MessageSourceChatbot): true,
+		string(models.MessageSourceCampaign): true, string(models.MessageSourceAutomation): true,
+		string(models.MessageSourcePhoneApp): true, string(models.MessageSourceIncoming): true,
+		string(models.MessageSourceCall): true,
 	}
 )
 

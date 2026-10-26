@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -386,8 +387,11 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 	}
 
-	// Mark messages as read
-	a.markMessagesAsRead(orgID, contactID, &contact)
+	// Mark messages as read, unless an AI assistant is reading: that is not
+	// an agent seeing them, and would send the contact read receipts
+	if _, viaMCP := middleware.MCPClient(r); !viaMCP {
+		a.markMessagesAsRead(orgID, contactID, &contact)
+	}
 
 	response := a.buildMessagesResponse(messages)
 	return r.SendEnvelope(map[string]any{

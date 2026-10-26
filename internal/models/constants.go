@@ -64,6 +64,7 @@ type MessageSource string
 
 const (
 	MessageSourceAPI        MessageSource = "api"        // sent with an API key
+	MessageSourceMCP        MessageSource = "mcp"        // sent by an AI assistant through the MCP server
 	MessageSourceAgent      MessageSource = "agent"      // sent by a logged-in user from the UI
 	MessageSourceChatbot    MessageSource = "chatbot"    // keyword, flow, AI, greeting and fallback replies
 	MessageSourceCampaign   MessageSource = "campaign"   // bulk campaign worker

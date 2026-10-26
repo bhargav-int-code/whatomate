@@ -17,6 +17,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/frontend"
 	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/internal/mcpserver"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
@@ -897,6 +898,23 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/products/{id}", app.DeleteCatalogProduct)
 
 	// Serve embedded frontend (SPA)
+	// MCP server for AI assistants. Outside /api, so it authenticates its own
+	// bearer tokens; its tools call the routes above in-process.
+	mcpSrv := mcpserver.New(app, g.Handler())
+	serveMCP := func(r *fastglue.Request) error {
+		mcpSrv.Handler(r.RequestCtx)
+		return nil
+	}
+	g.POST(mcpserver.Path, serveMCP)
+	g.GET(mcpserver.Path, serveMCP)
+	g.DELETE(mcpserver.Path, serveMCP)
+	serveMCPMetadata := func(r *fastglue.Request) error {
+		mcpSrv.ResourceMetadataHandler(r.RequestCtx)
+		return nil
+	}
+	g.GET(mcpserver.ResourceMetadataPath, serveMCPMetadata)
+	g.GET("/.well-known/oauth-protected-resource", serveMCPMetadata)
+
 	if frontend.IsEmbedded() {
 		lo.Info("Serving embedded frontend", "base_path", basePath)
 		frontendHandler := frontend.Handler(basePath)

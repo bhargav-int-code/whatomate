@@ -156,7 +156,9 @@ func SLASendOptions() MessageSendOptions {
 func userSendOptions(r *fastglue.Request, userID uuid.UUID) MessageSendOptions {
 	opts := DefaultSendOptions()
 	opts.SentByUserID = &userID
-	if middleware.IsAPIKeyAuth(r) {
+	if _, ok := middleware.MCPClient(r); ok {
+		opts.Source = models.MessageSourceMCP
+	} else if middleware.IsAPIKeyAuth(r) {
 		opts.Source = models.MessageSourceAPI
 	}
 	return opts
