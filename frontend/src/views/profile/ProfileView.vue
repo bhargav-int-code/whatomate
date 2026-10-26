@@ -12,6 +12,7 @@ import { usersService } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { PageHeader } from '@/components/shared'
 import { getErrorMessage } from '@/lib/api-utils'
+import ConnectedAppsCard from './ConnectedAppsCard.vue'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -169,6 +170,8 @@ async function changePassword() {
             </div>
           </CardContent>
         </Card>
+
+        <ConnectedAppsCard />
       </div>
     </ScrollArea>
   </div>

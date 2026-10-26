@@ -722,6 +722,7 @@ export const organizationService = {
     meta_app_id?: string
     meta_config_id?: string
     meta_app_secret?: string
+    mcp_enabled?: boolean
   }) => api.put('/org/settings', data),
   uploadOrgAudio: (file: File, type: 'hold_music' | 'ringback') => {
     const formData = new FormData()
@@ -863,7 +864,7 @@ export const auditLogsService = {
 }
 
 export type MessageLogStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | 'received'
-export type MessageLogSource = 'api' | 'agent' | 'chatbot' | 'campaign' | 'automation' | 'phone_app' | 'incoming' | 'call'
+export type MessageLogSource = 'api' | 'mcp' | 'agent' | 'chatbot' | 'campaign' | 'automation' | 'phone_app' | 'incoming' | 'call'
 
 export interface MessageLog {
   id: string
@@ -940,6 +941,49 @@ export interface ExportUpdate {
   file_name?: string
   row_count: number
   error?: string
+}
+
+export type MCPScope = 'messages:read' | 'messages:send' | 'campaigns:read' | 'campaigns:write' | 'webhooks:read'
+
+export const MCP_SCOPES: MCPScope[] = ['messages:read', 'messages:send', 'campaigns:read', 'campaigns:write', 'webhooks:read']
+
+// An AI assistant a user connected with OAuth
+export interface MCPConnection {
+  id: string
+  client_name: string
+  client_id: string
+  scopes: MCPScope[]
+  organization_id: string
+  organization_name: string
+  user_id: string
+  user_name: string
+  user_email: string
+  created_at: string
+  last_used_at?: string
+}
+
+// A pending request from an AI assistant, shown on the consent page
+export interface OAuthConsentRequest {
+  id: string
+  client_name: string
+  client_uri?: string
+  logo_uri?: string
+  redirect_host: string
+  scopes: MCPScope[]
+  organizations: { id: string; name: string; mcp_enabled: boolean; is_current: boolean }[]
+}
+
+export const mcpService = {
+  // The MCP endpoint AI assistants connect to
+  endpointUrl: () => `${window.location.origin}${basePath}/mcp`,
+  listConnections: () => api.get<{ connections: MCPConnection[] }>('/mcp/connections'),
+  revokeConnection: (id: string) => api.delete(`/mcp/connections/${id}`),
+  listMyConnections: () => api.get<{ connections: MCPConnection[] }>('/me/connected-apps'),
+  revokeMyConnection: (id: string) => api.delete(`/me/connected-apps/${id}`),
+  getConsentRequest: (id: string) => api.get<OAuthConsentRequest>(`/oauth/requests/${id}`),
+  approve: (id: string, data: { organization_id: string; scopes: MCPScope[] }) =>
+    api.post<{ redirect_url: string }>(`/oauth/requests/${id}/approve`, data),
+  deny: (id: string) => api.post<{ redirect_url: string }>(`/oauth/requests/${id}/deny`),
 }
 
 export const exportsService = {

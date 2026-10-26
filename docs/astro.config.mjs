@@ -41,6 +41,7 @@ export default defineConfig({
             { label: 'Calling', slug: 'features/calling' },
             { label: 'Meta Insights', slug: 'features/meta-insights' },
             { label: 'Outbound Webhooks', slug: 'features/webhooks' },
+            { label: 'AI Assistants (MCP)', slug: 'features/mcp' },
           ],
         },
         {

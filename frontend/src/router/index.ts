@@ -29,6 +29,13 @@ const router = createRouter({
       meta: { requiresAuth: false }
     },
     {
+      // AI assistants send users here to approve access (OAuth consent)
+      path: '/oauth/consent',
+      name: 'oauth-consent',
+      component: () => import('@/views/oauth/ConsentView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/auth/sso/callback',
       name: 'sso-callback',
       component: () => import('@/views/auth/SSOCallbackView.vue'),
@@ -304,6 +311,12 @@ const router = createRouter({
           name: 'webhook-logs',
           component: () => import('@/views/settings/WebhookLogsView.vue'),
           meta: { permission: 'webhook_logs' }
+        },
+        {
+          path: 'settings/ai-assistants',
+          name: 'ai-assistants',
+          component: () => import('@/views/settings/AIAssistantsView.vue'),
+          meta: { permission: 'settings.general' }
         },
         {
           path: 'settings/audit-logs',

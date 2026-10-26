@@ -45,7 +45,7 @@ const { t } = useI18n()
 const authStore = useAuthStore()
 
 const STATUSES: MessageLogStatus[] = ['pending', 'sent', 'delivered', 'read', 'failed', 'received']
-const SOURCES: MessageLogSource[] = ['api', 'agent', 'chatbot', 'campaign', 'automation', 'phone_app', 'incoming', 'call']
+const SOURCES: MessageLogSource[] = ['api', 'mcp', 'agent', 'chatbot', 'campaign', 'automation', 'phone_app', 'incoming', 'call']
 // Template names are listed with the templates API's maximum page size, up to
 // this many pages.
 const TEMPLATE_PAGE_SIZE = 100

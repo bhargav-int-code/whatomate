@@ -945,6 +945,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		})
 	}
 	g.GET(mcpserver.AuthorizationServerMetadataPath, fast(mcpSrv.AuthorizationServerMetadataHandler))
+	// RFC 8414 path form, used when public_url has a path (a base_path)
+	g.GET(mcpserver.AuthorizationServerMetadataPath+"/{path:*}", fast(mcpSrv.AuthorizationServerMetadataHandler))
 	g.POST(mcpserver.RegisterPath, register)
 	g.GET(mcpserver.AuthorizePath, fast(mcpSrv.AuthorizeHandler))
 	g.POST(mcpserver.TokenPath, fast(mcpSrv.TokenHandler))
