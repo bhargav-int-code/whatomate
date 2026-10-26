@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/shridarpatil/whatomate/internal/middleware"
-	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/oauth"
 )
 
 // Principal is the user an MCP request acts as, and what it may do.
@@ -45,10 +45,14 @@ func principalFrom(info *auth.TokenInfo) *Principal {
 	return p
 }
 
-// verifyToken resolves a bearer token to a Principal. API keys act as their
-// creator with every scope, exactly like the REST API.
-func (s *Server) verifyToken(_ context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
-	if !strings.HasPrefix(token, "whm_") {
+// verifyToken resolves a bearer token to a Principal: an OAuth access token
+// acts as the user who approved it, with the scopes they granted; an API key
+// acts as its creator with every scope, exactly like the REST API.
+func (s *Server) verifyToken(_ context.Context, token string, r *http.Request) (*auth.TokenInfo, error) {
+	switch {
+	case strings.HasPrefix(token, oauth.AccessTokenPrefix):
+		return s.verifyAccessToken(token, r)
+	case !strings.HasPrefix(token, "whm_"):
 		return nil, fmt.Errorf("%w: unrecognized token", auth.ErrInvalidToken)
 	}
 	key, ok := middleware.AuthenticateAPIKey(s.app.DB, token)
@@ -73,6 +77,43 @@ func (s *Server) verifyToken(_ context.Context, token string, _ *http.Request) (
 		info.Expiration = *key.ExpiresAt
 	}
 	return info, nil
+}
+
+// verifyAccessToken resolves an OAuth access token. The token must have been
+// issued for this endpoint (RFC 8707 audience), and its user must still be
+// active and in the organization.
+func (s *Server) verifyAccessToken(token string, r *http.Request) (*auth.TokenInfo, error) {
+	grant, err := s.oauth.LookupAccessToken(token)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", auth.ErrInvalidToken, err)
+	}
+	conn := grant.Connection
+	if conn.Resource != oauth.NormalizeResource(s.baseURL(r)+Path) {
+		return nil, fmt.Errorf("%w: token was issued for another server", auth.ErrInvalidToken)
+	}
+	member, err := s.oauth.CheckMembership(conn.UserID, conn.OrganizationID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", auth.ErrInvalidToken, err)
+	}
+	client := conn.ClientName
+	if client == "" {
+		client = "an OAuth app"
+	}
+	p := &Principal{
+		UserID:       conn.UserID,
+		OrgID:        conn.OrganizationID,
+		Email:        member.User.Email,
+		RoleID:       member.RoleID,
+		IsSuperAdmin: member.User.IsSuperAdmin,
+		Client:       client,
+		Scopes:       oauth.Split(conn.Scopes),
+	}
+	return &auth.TokenInfo{
+		Scopes:     scopeNames(p.Scopes),
+		Expiration: grant.ExpiresAt,
+		UserID:     p.UserID.String(),
+		Extra:      map[string]any{principalKey: p},
+	}, nil
 }
 
 // apiKeyHeaderAsBearer accepts the REST API's X-API-Key header as well as a
@@ -109,10 +150,6 @@ func (s *Server) requireEnabled(next http.Handler) http.Handler {
 }
 
 func (s *Server) orgEnabled(orgID uuid.UUID) bool {
-	var org models.Organization
-	if err := s.app.DB.Select("id", "settings").Where("id = ?", orgID).First(&org).Error; err != nil {
-		return false
-	}
-	enabled, _ := org.Settings["mcp_enabled"].(bool)
-	return enabled
+	enabled, err := s.oauth.MCPEnabled(orgID)
+	return err == nil && enabled
 }

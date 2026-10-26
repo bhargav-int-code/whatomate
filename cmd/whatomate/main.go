@@ -19,6 +19,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/mcpserver"
 	"github.com/shridarpatil/whatomate/internal/middleware"
+	"github.com/shridarpatil/whatomate/internal/oauth"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -294,6 +295,7 @@ func runServer(args []string) {
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	go app.StartWebhookDeliverySweeper(sweepCtx)
 	go app.StartExportSweeper(sweepCtx)
+	go oauth.NewStore(db, rdb, httpClient).StartSweeper(sweepCtx, lo.Error)
 	if err := app.StartExportUpdatesSubscriber(sweepCtx); err != nil {
 		lo.Error("Failed to start export updates subscriber", "error", err)
 	}
@@ -601,6 +603,17 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/me/password", app.ChangePassword)
 	g.PUT("/api/me/availability", app.UpdateAvailability)
 	g.GET("/api/me/organizations", app.ListMyOrganizations)
+	g.GET("/api/me/connected-apps", app.ListMyConnectedApps)
+	g.DELETE("/api/me/connected-apps/{id}", app.RevokeMyConnectedApp)
+
+	// OAuth consent for AI assistants (the consent page calls these)
+	g.GET("/api/oauth/requests/{id}", app.GetOAuthRequest)
+	g.POST("/api/oauth/requests/{id}/approve", app.ApproveOAuthRequest)
+	g.POST("/api/oauth/requests/{id}/deny", app.DenyOAuthRequest)
+
+	// AI assistant connections across the organization (admins)
+	g.GET("/api/mcp/connections", app.ListMCPConnections)
+	g.DELETE("/api/mcp/connections/{id}", app.RevokeMCPConnection)
 
 	// User Management (admin only - enforced by middleware)
 	g.GET("/api/users", app.ListUsers)
@@ -914,6 +927,28 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	}
 	g.GET(mcpserver.ResourceMetadataPath, serveMCPMetadata)
 	g.GET("/.well-known/oauth-protected-resource", serveMCPMetadata)
+
+	// OAuth authorization server for AI assistants. Public endpoints: clients
+	// authenticate with PKCE, and users approve on the consent page.
+	fast := func(h fasthttp.RequestHandler) fastglue.FastRequestHandler {
+		return func(r *fastglue.Request) error {
+			h(r.RequestCtx)
+			return nil
+		}
+	}
+	register := fast(mcpSrv.RegisterHandler)
+	if cfg.RateLimit.Enabled {
+		// Per IP: AI providers connect from shared addresses, so this is
+		// generous, but it stops anyone filling the clients table.
+		register = withRateLimit(register, middleware.RateLimitOpts{
+			Redis: rdb, Log: lo, Max: 30, Window: time.Hour, KeyPrefix: "oauth_register", TrustProxy: cfg.RateLimit.TrustProxy,
+		})
+	}
+	g.GET(mcpserver.AuthorizationServerMetadataPath, fast(mcpSrv.AuthorizationServerMetadataHandler))
+	g.POST(mcpserver.RegisterPath, register)
+	g.GET(mcpserver.AuthorizePath, fast(mcpSrv.AuthorizeHandler))
+	g.POST(mcpserver.TokenPath, fast(mcpSrv.TokenHandler))
+	g.POST(mcpserver.RevokePath, fast(mcpSrv.RevokeHandler))
 
 	if frontend.IsEmbedded() {
 		lo.Info("Serving embedded frontend", "base_path", basePath)

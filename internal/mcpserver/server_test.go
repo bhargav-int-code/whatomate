@@ -39,6 +39,13 @@ type env struct {
 
 func newEnv(t *testing.T, permissionKeys ...string) *env {
 	t.Helper()
+	return newEnvWithClient(t, &http.Client{Timeout: 5 * time.Second}, permissionKeys...)
+}
+
+// newEnvWithClient is newEnv with the HTTP client used for outbound requests,
+// such as fetching client metadata documents.
+func newEnvWithClient(t *testing.T, httpClient *http.Client, permissionKeys ...string) *env {
+	t.Helper()
 	db := testutil.SetupTestDB(t)
 	rdb := testutil.SetupTestRedis(t)
 	if rdb == nil {
@@ -52,7 +59,7 @@ func newEnv(t *testing.T, permissionKeys ...string) *env {
 		DB:         db,
 		Log:        testutil.NopLogger(),
 		Redis:      rdb,
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		HTTPClient: httpClient,
 	}
 
 	org := testutil.CreateTestOrganization(t, db)
@@ -78,6 +85,14 @@ func newEnv(t *testing.T, permissionKeys ...string) *env {
 	srv := mcpserver.New(app, g.Handler())
 	g.POST(mcpserver.Path, func(r *fastglue.Request) error { srv.Handler(r.RequestCtx); return nil })
 	g.GET(mcpserver.ResourceMetadataPath, func(r *fastglue.Request) error { srv.ResourceMetadataHandler(r.RequestCtx); return nil })
+	fast := func(h fasthttp.RequestHandler) fastglue.FastRequestHandler {
+		return func(r *fastglue.Request) error { h(r.RequestCtx); return nil }
+	}
+	g.GET(mcpserver.AuthorizationServerMetadataPath, fast(srv.AuthorizationServerMetadataHandler))
+	g.POST(mcpserver.RegisterPath, fast(srv.RegisterHandler))
+	g.GET(mcpserver.AuthorizePath, fast(srv.AuthorizeHandler))
+	g.POST(mcpserver.TokenPath, fast(srv.TokenHandler))
+	g.POST(mcpserver.RevokePath, fast(srv.RevokeHandler))
 
 	ln := fasthttputil.NewInmemoryListener()
 	server := &fasthttp.Server{Handler: g.Handler()}
@@ -116,6 +131,13 @@ func registerRoutes(g *fastglue.Fastglue, app *handlers.App) {
 	g.GET("/api/campaigns/{id}/recipients", app.GetCampaignRecipients)
 	g.GET("/api/webhook-logs", app.ListWebhookLogs)
 	g.GET("/api/webhook-logs/{id}", app.GetWebhookLog)
+	g.GET("/api/oauth/requests/{id}", app.GetOAuthRequest)
+	g.POST("/api/oauth/requests/{id}/approve", app.ApproveOAuthRequest)
+	g.POST("/api/oauth/requests/{id}/deny", app.DenyOAuthRequest)
+	g.GET("/api/me/connected-apps", app.ListMyConnectedApps)
+	g.DELETE("/api/me/connected-apps/{id}", app.RevokeMyConnectedApp)
+	g.GET("/api/mcp/connections", app.ListMCPConnections)
+	g.DELETE("/api/mcp/connections/{id}", app.RevokeMCPConnection)
 }
 
 func createAPIKey(t *testing.T, app *handlers.App, orgID, userID uuid.UUID) string {

@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/internal/oauth"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
@@ -40,6 +41,7 @@ Everything you do is attributed to the connected user and limited by their role.
 // Server serves the MCP endpoint.
 type Server struct {
 	app       *handlers.App
+	oauth     *oauth.Store
 	publicURL string
 	dispatch  *dispatcher
 	handler   fasthttp.RequestHandler
@@ -55,6 +57,7 @@ type Server struct {
 func New(app *handlers.App, router fasthttp.RequestHandler) *Server {
 	s := &Server{
 		app:       app,
+		oauth:     oauth.NewStore(app.DB, app.Redis, app.HTTPClient),
 		publicURL: strings.TrimRight(app.Config.Server.PublicURL, "/"),
 		dispatch:  newDispatcher(router, app.Config.JWT.Secret),
 		servers:   make(map[string]*mcp.Server),
@@ -97,27 +100,29 @@ func (s *Server) ResourceMetadataHandler(ctx *fasthttp.RequestCtx) {
 			ResourceName:           "Whatomate",
 			BearerMethodsSupported: []string{"header"},
 			ScopesSupported:        scopeNames(allScopes),
-			// No authorization server yet: until OAuth support lands,
-			// clients connect with an API key as the bearer token.
+			AuthorizationServers:   []string{base},
 		}).ServeHTTP(w, r)
 	})(ctx)
 }
 
-// baseURL is the server's public origin: the configured public URL, or one
-// derived from the request.
+// baseURL is the server's public URL: the configured one, or one derived
+// from the request.
 func (s *Server) baseURL(r *http.Request) string {
+	return s.origin(r.Host, r.Header.Get("X-Forwarded-Proto"), r.Header.Get("X-Forwarded-Host"), r.TLS != nil)
+}
+
+func (s *Server) origin(host, forwardedProto, forwardedHost string, isTLS bool) string {
 	if s.publicURL != "" {
 		return s.publicURL
 	}
 	scheme := "https"
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
-	} else if r.TLS == nil && isLocalHost(r.Host) {
+	if forwardedProto != "" {
+		scheme = forwardedProto
+	} else if !isTLS && isLocalHost(host) {
 		scheme = "http"
 	}
-	host := r.Host
-	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
-		host = fwd
+	if forwardedHost != "" {
+		host = forwardedHost
 	}
 	return scheme + "://" + host
 }

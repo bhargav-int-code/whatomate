@@ -1,26 +1,20 @@
 package mcpserver
 
-// Scope limits what a connection may do. A tool is available only when the
-// connection holds its scope, and even then the user's role must allow the
-// underlying action: effective access is role permissions ∩ scopes.
-type Scope string
+import "github.com/shridarpatil/whatomate/internal/oauth"
+
+// Scope limits what a connection may do; see oauth.Scope.
+type Scope = oauth.Scope
 
 const (
-	ScopeMessagesRead   Scope = "messages:read"   // contacts, conversations, templates, message logs, stats
-	ScopeMessagesSend   Scope = "messages:send"   // send messages, create and tag contacts
-	ScopeCampaignsRead  Scope = "campaigns:read"  // campaigns and their recipients
-	ScopeCampaignsWrite Scope = "campaigns:write" // create, fill, start, pause and cancel campaigns
-	ScopeWebhooksRead   Scope = "webhooks:read"   // outbound webhook delivery logs
+	ScopeMessagesRead   = oauth.ScopeMessagesRead
+	ScopeMessagesSend   = oauth.ScopeMessagesSend
+	ScopeCampaignsRead  = oauth.ScopeCampaignsRead
+	ScopeCampaignsWrite = oauth.ScopeCampaignsWrite
+	ScopeWebhooksRead   = oauth.ScopeWebhooksRead
 )
 
 // allScopes is every scope, in the order they are presented to users.
-var allScopes = []Scope{
-	ScopeMessagesRead,
-	ScopeMessagesSend,
-	ScopeCampaignsRead,
-	ScopeCampaignsWrite,
-	ScopeWebhooksRead,
-}
+var allScopes = oauth.AllScopes
 
 func scopeNames(scopes []Scope) []string {
 	names := make([]string, len(scopes))
