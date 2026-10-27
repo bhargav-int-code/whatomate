@@ -288,6 +288,12 @@ const router = createRouter({
           meta: { permission: 'custom_actions' }
         },
         {
+          path: 'message-logs',
+          name: 'message-logs',
+          component: () => import('@/views/message-logs/MessageLogsView.vue'),
+          meta: { permission: 'message_logs' }
+        },
+        {
           path: 'settings/audit-logs',
           name: 'audit-logs',
           component: () => import('@/views/settings/AuditLogsView.vue'),
@@ -354,6 +360,7 @@ const navigationOrder = [
   { path: '/templates', permission: 'templates' },
   { path: '/flows', permission: 'flows.whatsapp' },
   { path: '/campaigns', permission: 'campaigns' },
+  { path: '/message-logs', permission: 'message_logs' },
   { path: '/calling/logs', permission: 'call_logs', childPaths: [
     { path: '/calling/logs', permission: 'call_logs' },
     { path: '/calling/ivr-flows', permission: 'ivr_flows' },

@@ -126,6 +126,7 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 		WhatsAppMessageID: waMessageID,
 		Direction:         models.DirectionOutgoing,
 		MessageType:       models.MessageTypeTemplate,
+		Source:            models.MessageSourceCampaign,
 		TemplateParams:    job.TemplateParams,
 		Metadata: models.JSONB{
 			"campaign_id":    job.CampaignID.String(),
@@ -153,6 +154,8 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 	} else {
 		w.Log.Info("Message sent", "recipient", job.PhoneNumber, "message_id", waMessageID)
 		message.Status = models.MessageStatusSent
+		sentAt := time.Now()
+		message.SentAt = &sentAt
 		w.updateRecipientStatus(job.RecipientID, models.MessageStatusSent, waMessageID, "")
 		w.incrementCampaignCount(job.CampaignID, "sent_count")
 	}

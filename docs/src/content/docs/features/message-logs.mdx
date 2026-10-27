@@ -1,0 +1,68 @@
+---
+title: Message Logs
+description: Delivery logs for every message sent and received, with status, timestamps and failure reasons
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Message Logs is a searchable record of every WhatsApp message your organization sent or received: when it went out, who it went to, whether it was delivered and read, and why it failed if it did. Use it to answer "did this customer get our message?" without opening the conversation.
+
+Open it from **Messaging → Message Logs** in the sidebar.
+
+## What each row shows
+
+| Column | Meaning |
+|---|---|
+| Time | When the message was created, in your local time. |
+| Customer | Contact name and phone number. Deleted contacts keep their details. |
+| Direction | Outgoing (sent by you) or incoming (from the customer). |
+| Status | `Pending`, `Sent`, `Delivered`, `Read` or `Failed` for outgoing messages; `Received` for incoming ones. Failed rows show the reason underneath. |
+| Template | The template name, or the message type for non-template messages. |
+| Source | How the message was sent (see below). |
+| Content | The start of the message text. |
+
+Click any row to open its details: the full content, a **delivery timeline** (created, sent, delivered and read times), the failure reason, the WhatsApp account, campaign, Meta pricing category, who sent it and the WhatsApp message ID. **Open Conversation** jumps to the chat with that customer.
+
+### Sources
+
+| Source | Messages |
+|---|---|
+| API | Sent by your systems through the API with an API key. |
+| Agent | Sent by a team member from the inbox. |
+| Chatbot | Keyword, flow and AI replies, greetings, fallbacks and out-of-hours messages. |
+| Campaign | Sent by a bulk campaign. |
+| Automation | SLA notifications, inactivity reminders and auto-close messages. |
+| Phone App | Sent from the WhatsApp Business app on your phone (coexistence). |
+| Customer | Received from the customer. |
+| Call | Missed-call entries from voice calling. |
+
+Messages from before Message Logs was added show **Unknown** as their source and have no delivery timestamps.
+
+## Filtering
+
+Filter by date range, WhatsApp account, status, direction, source, template and customer number. The customer number can be typed in any format: `+91 98765 43210` and `919876543210` match the same contact.
+
+Logs cover the **last 90 days**. Results load 50 at a time; use **Newer** and **Older** to move through them. There's no total count, which keeps the page fast however many messages you send. Narrow the filters to find a specific message.
+
+## How delivery status works
+
+Delivery statuses and times come from Meta's status callbacks:
+
+- **Sent** is when Meta accepted the message, replaced by Meta's own time when its "sent" callback arrives.
+- **Delivered** and **Read** are the times Meta reports.
+- The status only moves forward. If Meta reports "read" before "delivered", the status stays **Read** and the delivered time is still filled in when it arrives.
+- A step Meta never reports stays empty; times are never guessed.
+
+Status updates need the **messages** field subscribed in your Meta app's WhatsApp webhook configuration.
+
+<Aside type="note">
+  A request rejected before a message is created, such as a template that doesn't exist or isn't approved, doesn't appear in the logs. The API returns that error directly to the caller.
+</Aside>
+
+## Permissions
+
+Viewing logs requires the `message_logs:read` permission, which the **admin** and **manager** roles have by default. Grant it to other roles under **Settings → Roles**. When your organization masks phone numbers, numbers in the logs are masked too.
+
+## API
+
+The same data is available through the [Message Logs API](/whatomate/api-reference/message-logs).

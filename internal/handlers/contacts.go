@@ -693,8 +693,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 		}
 	}
 
-	opts := DefaultSendOptions()
-	opts.SentByUserID = &userID
+	opts := userSendOptions(r, userID)
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
@@ -878,8 +877,7 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 		Caption:       caption,
 	}
 
-	opts := DefaultSendOptions()
-	opts.SentByUserID = &userID
+	opts := userSendOptions(r, userID)
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)

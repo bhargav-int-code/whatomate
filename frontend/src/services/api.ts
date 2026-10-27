@@ -862,6 +862,56 @@ export const auditLogsService = {
     api.get<{ audit_logs: AuditLogEntry[]; total: number }>('/audit-logs', { params }),
 }
 
+export type MessageLogStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | 'received'
+export type MessageLogSource = 'api' | 'agent' | 'chatbot' | 'campaign' | 'automation' | 'phone_app' | 'incoming' | 'call'
+
+export interface MessageLog {
+  id: string
+  created_at: string
+  direction: 'incoming' | 'outgoing'
+  // Empty for messages created before message logs existed
+  source: MessageLogSource | ''
+  status: MessageLogStatus
+  sent_at: string | null
+  delivered_at: string | null
+  read_at: string | null
+  contact_id: string
+  contact_name: string
+  contact_phone: string
+  whatsapp_account: string
+  message_type: string
+  template_name: string
+  // Truncated to 200 characters in list responses
+  content: string
+  error_message: string
+  pricing_category: string
+  campaign_id: string
+  campaign_name: string
+  whatsapp_message_id: string
+  // Detail response only
+  sent_by_user_id?: string
+  sent_by_user_name?: string
+}
+
+export interface MessageLogListParams {
+  from: string
+  to: string
+  account?: string
+  status?: MessageLogStatus
+  direction?: 'incoming' | 'outgoing'
+  source?: MessageLogSource
+  template?: string
+  phone?: string
+  cursor?: string
+  dir?: 'older' | 'newer'
+}
+
+export const messageLogsService = {
+  list: (params: MessageLogListParams) =>
+    api.get<{ logs: MessageLog[]; next_cursor: string; prev_cursor: string; limit: number }>('/message-logs', { params }),
+  get: (id: string) => api.get<MessageLog>(`/message-logs/${id}`),
+}
+
 export const webhooksService = {
   list: (params?: { search?: string; page?: number; limit?: number }) =>
     api.get<{ webhooks: Webhook[]; available_events: WebhookEvent[]; total?: number }>('/webhooks', { params }),

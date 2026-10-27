@@ -1,0 +1,117 @@
+---
+title: Message Logs
+description: Browse delivery logs for every message sent and received
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution">
+  Message-log endpoints require the `message_logs:read` permission (granted to the `admin` and `manager` roles by default).
+</Aside>
+
+## Overview
+
+Message logs list every message in the organization, incoming and outgoing, with its delivery status, delivery timestamps, failure reason and how it was sent. Results are scoped to the caller's organization and limited to the **last 90 days**.
+
+Each outgoing message records when Meta reported it sent, delivered and read. Meta can report statuses out of order (for example `read` before `delivered`); the status only moves forward, but each timestamp is recorded when it arrives. Timestamps are never inferred, so a message Meta reported as `read` without a `delivered` callback has no `delivered_at`.
+
+Messages created before message logs were introduced have no `source`, timestamps or `pricing_category`.
+
+## List Message Logs
+
+Return one page of up to 50 messages, newest first.
+
+```bash
+GET /api/message-logs
+```
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `from` | string | **Required.** Start of the range. Accepts `YYYY-MM-DD` (UTC) or RFC 3339, e.g. `2026-10-01T00:00:00+05:30`. Must be within the last 90 days. |
+| `to` | string | **Required.** End of the range. A `YYYY-MM-DD` value is treated as end-of-day. |
+| `account` | string | WhatsApp account name. |
+| `status` | string | `pending`, `sent`, `delivered`, `read`, `failed` or `received` (incoming). |
+| `direction` | string | `incoming` or `outgoing`. |
+| `source` | string | How the message was sent (see [Sources](#sources)). |
+| `template` | string | Exact template name. |
+| `phone` | string | Exact customer phone number; `+`, spaces and dashes are ignored. Includes messages of deleted contacts. |
+| `cursor` | string | A `next_cursor` or `prev_cursor` value from a previous response. |
+| `dir` | string | `older` (default) with `next_cursor`, or `newer` with `prev_cursor`. |
+
+There is no total count. Walk the results with the cursors: `next_cursor` is empty on the oldest page and `prev_cursor` is empty on the newest.
+
+### Response
+
+```json
+{
+  "status": "success",
+  "data": {
+    "logs": [
+      {
+        "id": "uuid",
+        "created_at": "2026-10-24T10:49:53Z",
+        "direction": "outgoing",
+        "source": "api",
+        "status": "read",
+        "sent_at": "2026-10-24T10:49:56Z",
+        "delivered_at": "2026-10-24T10:49:58Z",
+        "read_at": "2026-10-24T10:52:45Z",
+        "contact_id": "uuid",
+        "contact_name": "Narsimha",
+        "contact_phone": "919686692507",
+        "whatsapp_account": "Main",
+        "message_type": "template",
+        "template_name": "booking_confirmation_v8",
+        "content": "Hi Narsimha, your booking SP260002821 at Aura Sports Arena…",
+        "error_message": "",
+        "pricing_category": "utility",
+        "campaign_id": "",
+        "campaign_name": "",
+        "whatsapp_message_id": "wamid.HBgM…"
+      }
+    ],
+    "next_cursor": "MjAyNi0xMC0yNFQxMDo0OTo1My4xMjNa…",
+    "prev_cursor": "",
+    "limit": 50
+  }
+}
+```
+
+`content` is truncated to 200 characters; fetch a single log for the full text. When the organization masks phone numbers, `contact_phone` (and a `contact_name` that looks like a phone number) is masked.
+
+### Errors
+
+| Status | When |
+|--------|------|
+| `400` | `from`/`to` missing or malformed, `from` after `to`, `from` older than 90 days, or an invalid filter or cursor. |
+| `403` | Missing `message_logs:read`. |
+| `422` | The query took longer than 5 seconds. Narrow the date range or add filters. |
+
+## Get Message Log
+
+Return a single message with its full content and the user who sent it.
+
+```bash
+GET /api/message-logs/{id}
+```
+
+The response has the same fields as a list row, with the full `content` plus `sent_by_user_id` and `sent_by_user_name` (empty for messages not sent by a user, such as chatbot replies).
+
+## Sources
+
+| Source | Meaning |
+|--------|---------|
+| `api` | Sent through the API with an API key. |
+| `agent` | Sent by a signed-in user from the inbox. |
+| `chatbot` | Chatbot replies: keywords, flows, AI, greeting, fallback and out-of-hours messages. |
+| `campaign` | Sent by a bulk campaign. |
+| `automation` | SLA notifications, inactivity reminders and auto-close messages. |
+| `phone_app` | Sent from the WhatsApp Business app on the phone (coexistence). |
+| `incoming` | Received from a customer. |
+| `call` | Missed-call entries created by voice calling. |
+
+<Aside type="note">
+  Requests rejected before a message is created, such as a template that doesn't exist or isn't approved, don't appear in the logs. The API returns the error in its response.
+</Aside>

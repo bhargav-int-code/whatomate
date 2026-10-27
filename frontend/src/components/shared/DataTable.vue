@@ -36,6 +36,8 @@ const props = withDefaults(defineProps<{
   // Optional max height for the table area (e.g., 'calc(100vh - 320px)')
   // When set, the table body becomes scrollable while header and pagination stay fixed
   maxHeight?: string
+  // Make whole rows clickable; clicks emit 'row-click' with the row's item
+  clickableRows?: boolean
 }>(), {
   rowKey: 'id',
   serverPagination: false,
@@ -50,6 +52,7 @@ const emit = defineEmits<{
   'sort': [key: string, direction: 'asc' | 'desc']
   'update:currentPage': [page: number]
   'page-change': [page: number]
+  'row-click': [item: T]
 }>()
 
 defineSlots<{
@@ -216,7 +219,13 @@ function getRowKey(item: T, index: number): string {
       </TableRow>
 
       <!-- Data Rows -->
-      <TableRow v-else v-for="(item, index) in displayItems" :key="getRowKey(item, index)">
+      <TableRow
+        v-else
+        v-for="(item, index) in displayItems"
+        :key="getRowKey(item, index)"
+        :class="clickableRows && 'cursor-pointer'"
+        @click="clickableRows && emit('row-click', item)"
+      >
         <TableCell
           v-for="col in columns"
           :key="col.key"
