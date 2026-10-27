@@ -109,9 +109,11 @@ type WebhookResponse struct {
 // AvailableWebhookEvents returns the list of available webhook event types
 var AvailableWebhookEvents = []map[string]string{
 	{"value": string(models.WebhookEventMessageIncoming), "label": "Message Incoming", "description": "When a new message is received from a contact"},
-	{"value": string(models.WebhookEventMessageSent), "label": "Message Sent", "description": "When an agent sends a message"},
+	{"value": string(models.WebhookEventMessageSent), "label": "Message Sent", "description": "When an agent, the API or a campaign sends a message"},
 	{"value": string(models.WebhookEventMessageOutgoing), "label": "Message Outgoing", "description": "When a message is sent to a contact (includes echoes)"},
 	{"value": string(models.WebhookEventMessageFailed), "label": "Message Failed", "description": "When an outgoing message fails to send or Meta reports it as failed"},
+	{"value": string(models.WebhookEventMessageDelivered), "label": "Message Delivered", "description": "When Meta reports an outgoing message was delivered to the contact's phone"},
+	{"value": string(models.WebhookEventMessageRead), "label": "Message Read", "description": "When Meta reports the contact read an outgoing message"},
 	{"value": string(models.WebhookEventContactCreated), "label": "Contact Created", "description": "When a new contact is created"},
 	{"value": string(models.WebhookEventTransferCreated), "label": "Transfer Created", "description": "When a transfer to human agent is requested"},
 	{"value": string(models.WebhookEventTransferAssigned), "label": "Transfer Assigned", "description": "When a transfer is assigned to an agent"},

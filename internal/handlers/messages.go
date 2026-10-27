@@ -598,6 +598,11 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 		sentByUserID = msg.SentByUserID.String()
 	}
 
+	var campaignID string
+	if id, ok := msg.Metadata["campaign_id"].(string); ok {
+		campaignID = id
+	}
+
 	a.DispatchWebhook(account.OrganizationID, models.WebhookEventMessageSent, MessageEventData{
 		MessageID:       msg.ID.String(),
 		ContactID:       contact.ID.String(),
@@ -611,6 +616,25 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 		WhatsAppAccount: account.Name,
 		Direction:       models.DirectionOutgoing,
 		SentByUserID:    sentByUserID,
+
+		WhatsAppMessageID: msg.WhatsAppMessageID,
+		TemplateName:      msg.TemplateName,
+		CampaignID:        campaignID,
+	})
+}
+
+// DispatchMessageSent dispatches message.sent for a message sent outside the
+// API, such as by the campaign worker.
+func (a *App) DispatchMessageSent(account *models.WhatsAppAccount, contact *models.Contact, msg *models.Message) {
+	a.dispatchMessageSentWebhook(account, contact, msg)
+}
+
+// DispatchMessageSendFailed dispatches message.failed for a message Meta
+// rejected when it was sent outside the API, such as by the campaign worker.
+func (a *App) DispatchMessageSendFailed(msg *models.Message, contact *models.Contact, errMsg string) {
+	a.dispatchMessageFailedWebhook(msg, contact, MessageFailedEventData{
+		Source:       MessageFailureSourceSendError,
+		ErrorMessage: errMsg,
 	})
 }
 
@@ -642,6 +666,59 @@ func (a *App) dispatchMessageFailedWebhook(msg *models.Message, contact *models.
 	}
 
 	a.DispatchWebhook(msg.OrganizationID, models.WebhookEventMessageFailed, data)
+}
+
+// dispatchMessageStatusWebhook dispatches message.delivered or message.read
+// for status. Like message.failed it fires for every outgoing message,
+// chatbot and campaign sends included; source and campaign_id let receivers
+// filter. contact may be nil if it could not be loaded; recipientPhone
+// (Meta's recipient_id) is preferred over the contact's stored phone.
+func (a *App) dispatchMessageStatusWebhook(msg *models.Message, contact *models.Contact, recipientPhone string, status models.MessageStatus, at time.Time) {
+	event := models.WebhookEventMessageDelivered
+	if status == models.MessageStatusRead {
+		event = models.WebhookEventMessageRead
+	}
+	data := MessageStatusEventData{
+		MessageID:         msg.ID.String(),
+		WhatsAppMessageID: msg.WhatsAppMessageID,
+		ContactID:         msg.ContactID.String(),
+		ContactPhone:      recipientPhone,
+		MessageType:       msg.MessageType,
+		Content:           msg.Content,
+		TemplateName:      msg.TemplateName,
+		WhatsAppAccount:   msg.WhatsAppAccount,
+		Source:            msg.Source,
+		Status:            status,
+		StatusAt:          at.UTC(),
+		SentAt:            utcTime(msg.SentAt),
+		DeliveredAt:       utcTime(msg.DeliveredAt),
+		ReadAt:            utcTime(msg.ReadAt),
+		PricingCategory:   msg.PricingCategory,
+	}
+	if msg.SentByUserID != nil {
+		data.SentByUserID = msg.SentByUserID.String()
+	}
+	if campaignID, ok := msg.Metadata["campaign_id"].(string); ok {
+		data.CampaignID = campaignID
+	}
+	if contact != nil {
+		if data.ContactPhone == "" {
+			data.ContactPhone = contact.PhoneNumber
+		}
+		data.ContactName = contact.ProfileName
+	}
+
+	a.DispatchWebhook(msg.OrganizationID, event, data)
+}
+
+// utcTime returns t in UTC, so webhook payloads don't depend on the server's
+// timezone.
+func utcTime(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 // updateContactLastMessage updates contact's last_message_at and preview

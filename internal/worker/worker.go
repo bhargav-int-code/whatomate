@@ -30,6 +30,15 @@ type Worker struct {
 	// never wait on each other.
 	ExportConsumer *queue.RedisConsumer
 	Publisher      *queue.Publisher
+	// Webhooks dispatches outbound webhooks for campaign sends. Nil sends none.
+	Webhooks MessageWebhooks
+}
+
+// MessageWebhooks dispatches the outbound webhooks for messages the worker
+// sends. handlers.App implements it.
+type MessageWebhooks interface {
+	DispatchMessageSent(account *models.WhatsAppAccount, contact *models.Contact, msg *models.Message)
+	DispatchMessageSendFailed(msg *models.Message, contact *models.Contact, errMsg string)
 }
 
 // Ensure Worker implements JobHandler interface
@@ -183,6 +192,12 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 	// Save message record
 	if err := w.DB.Create(&message).Error; err != nil {
 		w.Log.Error("Failed to save message", "error", err, "recipient", job.PhoneNumber)
+	} else if w.Webhooks != nil {
+		if message.Status == models.MessageStatusFailed {
+			w.Webhooks.DispatchMessageSendFailed(&message, contact, message.ErrorMessage)
+		} else {
+			w.Webhooks.DispatchMessageSent(&account, contact, &message)
+		}
 	}
 
 	// Check if campaign is complete (all recipients processed)

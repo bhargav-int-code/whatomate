@@ -38,6 +38,10 @@ type MessageEventData struct {
 	WhatsAppAccount  string             `json:"whatsapp_account"`
 	Direction        models.Direction   `json:"direction,omitempty"`
 	SentByUserID     string             `json:"sent_by_user_id,omitempty"`
+	// Set on message.sent when known
+	WhatsAppMessageID string `json:"whatsapp_message_id,omitempty"`
+	TemplateName      string `json:"template_name,omitempty"`
+	CampaignID        string `json:"campaign_id,omitempty"`
 }
 
 // Message failure sources reported in MessageFailedEventData.Source
@@ -68,6 +72,30 @@ type MessageFailedEventData struct {
 	ErrorTitle        string             `json:"error_title,omitempty"`
 	ErrorMessage      string             `json:"error_message"`
 	ErrorDetails      string             `json:"error_details,omitempty"`
+}
+
+// MessageStatusEventData is the data for message.delivered and message.read.
+// Each fires once per message, when Meta first reports that status.
+type MessageStatusEventData struct {
+	MessageID         string               `json:"message_id"`
+	WhatsAppMessageID string               `json:"whatsapp_message_id"`
+	ContactID         string               `json:"contact_id"`
+	ContactPhone      string               `json:"contact_phone"`
+	ContactName       string               `json:"contact_name"`
+	MessageType       models.MessageType   `json:"message_type"`
+	Content           string               `json:"content"`
+	TemplateName      string               `json:"template_name,omitempty"`
+	WhatsAppAccount   string               `json:"whatsapp_account"`
+	Source            models.MessageSource `json:"source,omitempty"`
+	SentByUserID      string               `json:"sent_by_user_id,omitempty"`
+	CampaignID        string               `json:"campaign_id,omitempty"`
+	Status            models.MessageStatus `json:"status"`
+	// StatusAt is when Meta says the status happened
+	StatusAt        time.Time  `json:"status_at"`
+	SentAt          *time.Time `json:"sent_at,omitempty"`
+	DeliveredAt     *time.Time `json:"delivered_at,omitempty"`
+	ReadAt          *time.Time `json:"read_at,omitempty"`
+	PricingCategory string     `json:"pricing_category,omitempty"`
 }
 
 // ContactEventData represents data for contact events

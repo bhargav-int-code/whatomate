@@ -480,10 +480,18 @@ func TestUpdateMessageStatus_DeliveredBroadcastsViaWebSocket_NoErrorMessage(t *t
 	hub := websocket.NewHub(log)
 	go hub.Run()
 
+	// A delivered status also dispatches message.delivered, which reads the
+	// webhook config through the Redis cache.
+	redisClient := testutil.SetupTestRedis(t)
+	if redisClient == nil {
+		t.Skip("TEST_REDIS_URL not set, skipping test")
+	}
+
 	app := &App{
 		DB:    db,
 		Log:   log,
 		WSHub: hub,
+		Redis: redisClient,
 	}
 
 	uid := uuid.New().String()[:8]
@@ -724,6 +732,12 @@ func TestWebhookHandler_smb_app_state_sync(t *testing.T) {
 // payload delivered so far. Call app.WaitForBackgroundTasks() before reading.
 func captureMessageFailedWebhooks(t *testing.T, app *App, orgID uuid.UUID) func() []OutboundWebhookPayload {
 	t.Helper()
+	return captureWebhooks(t, app, orgID, models.WebhookEventMessageFailed)
+}
+
+// captureWebhooks is captureMessageFailedWebhooks for any events.
+func captureWebhooks(t *testing.T, app *App, orgID uuid.UUID, events ...models.WebhookEvent) func() []OutboundWebhookPayload {
+	t.Helper()
 
 	var mu sync.Mutex
 	var bodies [][]byte
@@ -739,13 +753,17 @@ func captureMessageFailedWebhooks(t *testing.T, app *App, orgID uuid.UUID) func(
 	}))
 	t.Cleanup(server.Close)
 
+	subscribed := make(models.StringArray, len(events))
+	for i, e := range events {
+		subscribed[i] = string(e)
+	}
 	app.HTTPClient = &http.Client{Timeout: 5 * time.Second}
 	require.NoError(t, app.DB.Create(&models.Webhook{
 		BaseModel:      models.BaseModel{ID: uuid.New()},
 		OrganizationID: orgID,
-		Name:           "test-message-failed-webhook",
+		Name:           "test-webhook",
 		URL:            server.URL,
-		Events:         models.StringArray{string(models.WebhookEventMessageFailed)},
+		Events:         subscribed,
 		IsActive:       true,
 	}).Error)
 
