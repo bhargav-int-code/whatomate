@@ -3,7 +3,8 @@ import { useTransfersStore } from '@/stores/transfers'
 import { useCallingStore } from '@/stores/calling'
 import { useAuthStore } from '@/stores/auth'
 import { useNotesStore } from '@/stores/notes'
-import { contactsService } from '@/services/api'
+import { contactsService, exportsService, type ExportUpdate } from '@/services/api'
+import { i18n } from '@/i18n'
 import { toast } from 'vue-sonner'
 import router from '@/router'
 
@@ -64,6 +65,9 @@ const WS_TYPE_CAMPAIGN_STATS_UPDATE = 'campaign_stats_update'
 // Permission types
 const WS_TYPE_PERMISSIONS_UPDATED = 'permissions_updated'
 
+// Export types
+const WS_TYPE_EXPORT_UPDATE = 'export_update'
+
 // Call types
 const WS_TYPE_CALL_INCOMING = 'call_incoming'
 const WS_TYPE_CALL_ANSWERED = 'call_answered'
@@ -106,6 +110,7 @@ class WebSocketService {
   private isConnected = false
   private hasConnectedBefore = false
   private campaignStatsCallbacks: ((payload: any) => void)[] = []
+  private exportUpdateCallbacks: ((payload: ExportUpdate) => void)[] = []
   private getTokenFn: (() => Promise<string | null>) | null = null
 
   async connect(getToken?: () => Promise<string | null>) {
@@ -249,6 +254,9 @@ class WebSocketService {
           break
         case WS_TYPE_PERMISSIONS_UPDATED:
           this.handlePermissionsUpdated()
+          break
+        case WS_TYPE_EXPORT_UPDATE:
+          this.handleExportUpdate(message.payload)
           break
         case WS_TYPE_CALL_INCOMING:
           this.handleCallIncoming(message.payload)
@@ -552,6 +560,32 @@ class WebSocketService {
     this.campaignStatsCallbacks.forEach(callback => callback(payload))
   }
 
+  // Exports finish in the background, possibly after the user has moved on,
+  // so tell them wherever they are.
+  private handleExportUpdate(payload: ExportUpdate) {
+    const t = i18n.global.t
+    if (payload.status === 'completed') {
+      toast.success(t('exports.readyTitle'), {
+        description: t('exports.readyDescription', { file: payload.file_name, count: payload.row_count.toLocaleString() }),
+        duration: 10000,
+        action: {
+          label: t('common.download'),
+          onClick: () => { window.location.href = exportsService.downloadUrl(payload.export_id) }
+        }
+      })
+    } else {
+      toast.error(t('exports.failedTitle'), {
+        description: payload.error,
+        duration: 10000,
+        action: {
+          label: t('exports.viewDownloads'),
+          onClick: () => router.push('/downloads')
+        }
+      })
+    }
+    this.exportUpdateCallbacks.forEach(callback => callback(payload))
+  }
+
   private async handlePermissionsUpdated() {
     const authStore = useAuthStore()
 
@@ -568,6 +602,16 @@ class WebSocketService {
       setTimeout(() => {
         window.location.reload()
       }, 1500)
+    }
+  }
+
+  onExportUpdate(callback: (payload: ExportUpdate) => void) {
+    this.exportUpdateCallbacks.push(callback)
+    return () => {
+      const index = this.exportUpdateCallbacks.indexOf(callback)
+      if (index > -1) {
+        this.exportUpdateCallbacks.splice(index, 1)
+      }
     }
   }
 

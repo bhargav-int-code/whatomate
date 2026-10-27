@@ -14,7 +14,16 @@ type JobType string
 const (
 	// JobTypeRecipient is for processing a single recipient message
 	JobTypeRecipient JobType = "recipient"
+	// JobTypeExport is for generating an export file
+	JobTypeExport JobType = "export"
 )
+
+// ExportJob asks a worker to generate the file for one export_jobs row. The
+// row holds everything else (type, filters, requester), so a retried or
+// duplicated job always works from the stored state.
+type ExportJob struct {
+	ExportID uuid.UUID `json:"export_id"`
+}
 
 // RecipientJob represents a single recipient message job
 type RecipientJob struct {
@@ -39,6 +48,9 @@ type Queue interface {
 	// EnqueueRecipients adds multiple recipient jobs to the queue
 	EnqueueRecipients(ctx context.Context, jobs []*RecipientJob) error
 
+	// EnqueueExport adds an export job to the exports stream
+	EnqueueExport(ctx context.Context, job *ExportJob) error
+
 	// Close closes the queue connection
 	Close() error
 }
@@ -46,6 +58,12 @@ type Queue interface {
 // JobHandler handles different job types
 type JobHandler interface {
 	HandleRecipientJob(ctx context.Context, job *RecipientJob) error
+}
+
+// ExportJobHandler is implemented by handlers that also process export jobs
+// (the export consumer requires it).
+type ExportJobHandler interface {
+	HandleExportJob(ctx context.Context, job *ExportJob) error
 }
 
 // Consumer defines the interface for consuming jobs from the queue

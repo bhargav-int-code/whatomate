@@ -1556,6 +1556,7 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		MessageType:       models.MessageType(msgType),
 		Content:           content,
 		Status:            models.MessageStatusReceived,
+		Source:            models.MessageSourceIncoming,
 	}
 
 	// Handle reply context - look up the original message by WhatsApp message ID

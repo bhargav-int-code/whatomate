@@ -13,7 +13,22 @@ import (
 const (
 	// CampaignStatsChannel is the Redis pub/sub channel for campaign stats updates
 	CampaignStatsChannel = "whatomate:campaign_stats"
+
+	// ExportUpdatesChannel is the Redis pub/sub channel workers use to report
+	// an export finishing, so the API can notify the requester
+	ExportUpdatesChannel = "whatomate:export_updates"
 )
+
+// ExportUpdate reports that an export finished (completed or failed)
+type ExportUpdate struct {
+	ExportID       uuid.UUID `json:"export_id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	Status         string    `json:"status"`
+	FileName       string    `json:"file_name,omitempty"`
+	RowCount       int64     `json:"row_count"`
+	Error          string    `json:"error,omitempty"`
+}
 
 // CampaignStatsUpdate represents a campaign stats update message
 type CampaignStatsUpdate struct {
@@ -56,7 +71,22 @@ func (p *Publisher) PublishCampaignStats(ctx context.Context, update *CampaignSt
 	return nil
 }
 
-// Subscriber subscribes to Redis pub/sub channels
+// PublishExportUpdate publishes an export's final state
+func (p *Publisher) PublishExportUpdate(ctx context.Context, update *ExportUpdate) error {
+	payload, err := json.Marshal(update)
+	if err != nil {
+		return err
+	}
+
+	if err := p.client.Publish(ctx, ExportUpdatesChannel, payload).Err(); err != nil {
+		p.log.Error("Failed to publish export update", "error", err, "export_id", update.ExportID)
+		return err
+	}
+	return nil
+}
+
+// Subscriber subscribes to Redis pub/sub channels. Use one Subscriber per
+// channel.
 type Subscriber struct {
 	client *redis.Client
 	log    logf.Logger
@@ -109,6 +139,37 @@ func (s *Subscriber) SubscribeCampaignStats(ctx context.Context, handler func(up
 		}
 	}()
 
+	return nil
+}
+
+// SubscribeExportUpdates subscribes to export updates. The handler is called
+// for each received update until ctx is cancelled.
+func (s *Subscriber) SubscribeExportUpdates(ctx context.Context, handler func(update *ExportUpdate)) error {
+	s.pubsub = s.client.Subscribe(ctx, ExportUpdatesChannel)
+	if _, err := s.pubsub.Receive(ctx); err != nil {
+		return err
+	}
+	s.log.Info("Subscribed to export updates channel")
+
+	ch := s.pubsub.Channel()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				var update ExportUpdate
+				if err := json.Unmarshal([]byte(msg.Payload), &update); err != nil {
+					s.log.Error("Failed to unmarshal export update", "error", err)
+					continue
+				}
+				handler(&update)
+			}
+		}
+	}()
 	return nil
 }
 

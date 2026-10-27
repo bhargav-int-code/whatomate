@@ -400,6 +400,17 @@ type Message struct {
 	ReplyToMessageID  *uuid.UUID    `gorm:"type:uuid" json:"reply_to_message_id,omitempty"`
 	SentByUserID      *uuid.UUID    `gorm:"type:uuid;index" json:"sent_by_user_id,omitempty"` // User who sent outgoing message
 	Metadata          JSONB         `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Source            MessageSource `gorm:"size:20" json:"source,omitempty"`
+
+	// Delivery timestamps for outgoing messages. Each is set once, from Meta's
+	// status callback timestamp (sent_at starts as the time Meta accepted the
+	// send). Nil when the status was never reported.
+	SentAt      *time.Time `json:"sent_at,omitempty"`
+	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
+	ReadAt      *time.Time `json:"read_at,omitempty"`
+	// PricingCategory is Meta's conversation pricing category from status
+	// callbacks (utility, marketing, authentication, service).
+	PricingCategory string `gorm:"size:30" json:"pricing_category,omitempty"`
 
 	// Relations
 	Organization   *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`

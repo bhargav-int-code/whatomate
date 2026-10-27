@@ -1,0 +1,145 @@
+---
+title: Webhook Logs
+description: Inspect every outbound webhook delivery, its attempts and the exact request sent
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution">
+  Viewing webhook logs requires `webhook_logs:read` (granted to `admin` and `manager` by default). Purging requires `webhook_logs:delete` (`admin` only).
+</Aside>
+
+## Overview
+
+Every time Whatomate sends an event to one of your [outbound webhooks](/whatomate/api-reference/webhooks), it records a **delivery**: one row per event per webhook. A delivery holds a snapshot of the request (URL, headers and the exact body that was signed and sent), every attempt with its HTTP status, error and duration, and the start of the receiver's last response. Test sends from `POST /api/webhooks/{id}/test` are recorded too, with event `test`.
+
+A delivery's `status` is:
+
+| Status | Meaning |
+|--------|---------|
+| `processing` | The first attempt or a retry is in flight. |
+| `success` | An attempt got a `2xx` response. |
+| `failed` | All 3 attempts failed, the delivery was cancelled, or the server stopped before it finished. |
+
+Deliveries interrupted by a server restart are marked `failed` with the reason *Interrupted: the server stopped before the delivery finished* within about 15 minutes.
+
+Logs are kept until an admin purges them. Results are limited to the **last 90 days**.
+
+## List Webhook Logs
+
+Return one page of up to 50 deliveries, newest first.
+
+```bash
+GET /api/webhook-logs
+```
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `from` | string | **Required.** Start of the range. Accepts `YYYY-MM-DD` (UTC) or RFC 3339. Must be within the last 90 days. |
+| `to` | string | **Required.** End of the range. A `YYYY-MM-DD` value is treated as end-of-day. |
+| `webhook_id` | uuid | Only this webhook's deliveries. |
+| `event` | string | Event type, e.g. `message.failed` or `test`. |
+| `status` | string | `processing`, `success` or `failed`. |
+| `search` | string | Exact reference ID (the message, contact or transfer the event is about) or customer phone number in any format. |
+| `cursor` | string | A `next_cursor` or `prev_cursor` value from a previous response. |
+| `dir` | string | `older` (default) with `next_cursor`, or `newer` with `prev_cursor`. |
+
+### Response
+
+```json
+{
+  "status": "success",
+  "data": {
+    "logs": [
+      {
+        "id": "uuid",
+        "created_at": "2026-10-24T15:14:56Z",
+        "webhook_id": "uuid",
+        "webhook_name": "SDR Bot Delivery",
+        "event": "message.failed",
+        "reference_id": "uuid",
+        "contact_phone": "919653095404",
+        "status": "failed",
+        "attempt_count": 3,
+        "response_status": 503,
+        "failure_reason": "HTTP 503 Service Unavailable",
+        "duration_ms": 214,
+        "completed_at": "2026-10-24T15:15:03Z"
+      }
+    ],
+    "next_cursor": "MjAyNi0xMC0yNFQxNToxNDo1Ni4xMjNa…",
+    "prev_cursor": "",
+    "limit": 50
+  }
+}
+```
+
+`webhook_name` is copied when the delivery is recorded, so logs stay readable after a webhook is renamed or deleted. `response_status` is `0` when no response was received (for example a timeout or refused connection).
+
+## Get Webhook Log
+
+Return one delivery with its request snapshot, the last response and every attempt.
+
+```bash
+GET /api/webhook-logs/{id}
+```
+
+```json
+{
+  "status": "success",
+  "data": {
+    "id": "uuid",
+    "event": "message.sent",
+    "status": "success",
+    "attempt_count": 2,
+    "request": {
+      "method": "POST",
+      "url": "https://example.com/webhooks/whatomate",
+      "headers": {
+        "Content-Type": "application/json",
+        "User-Agent": "Whatomate-Webhook/1.0",
+        "X-Source": "whatomate",
+        "X-Webhook-Signature": "sha256=…"
+      },
+      "body": { "event": "message.sent", "timestamp": "…", "data": { "message_id": "uuid" } }
+    },
+    "response": { "status_code": 200, "body": "{\"ok\":true}" },
+    "attempts": [
+      { "attempt": 1, "at": "…", "status_code": 500, "duration_ms": 120, "error": "HTTP 500 Internal Server Error" },
+      { "attempt": 2, "at": "…", "status_code": 200, "duration_ms": 95, "error": "" }
+    ]
+  }
+}
+```
+
+Headers are recorded exactly as sent, including your webhook's custom headers. The signing secret itself is never sent or recorded; only the per-payload `X-Webhook-Signature` is. `response.body` holds the first 2 KB of the receiver's last response.
+
+## Purge Webhook Logs
+
+Delete deliveries created before a cutoff. The cutoff must be **at least 7 days ago**.
+
+```bash
+POST /api/webhook-logs/purge
+```
+
+```json
+{
+  "before": "2026-10-01",
+  "webhook_id": "uuid",
+  "confirm": true
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `before` | **Required.** Deletes deliveries created before this time. `YYYY-MM-DD` (UTC) or RFC 3339. |
+| `webhook_id` | Optional. Only purge this webhook's deliveries. |
+| `confirm` | Without `true`, nothing is deleted and the response only reports how many deliveries match. |
+
+```json
+{ "status": "success", "data": { "matching": 182340, "started": true } }
+```
+
+A confirmed purge runs in the background in batches and is recorded in the [audit log](/whatomate/api-reference/audit-logs). Only one purge per organization runs at a time; starting another returns `409`.

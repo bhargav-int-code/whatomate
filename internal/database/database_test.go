@@ -249,3 +249,61 @@ func TestCreateDefaultAdmin_UsesExistingOrg(t *testing.T) {
 	db.Model(&models.Organization{}).Count(&orgCount)
 	assert.Equal(t, int64(1), orgCount, "should reuse existing organization")
 }
+
+// roleHasPermission reports whether the org's system role holds resource:action.
+func roleHasPermission(t *testing.T, db *gorm.DB, orgID uuid.UUID, roleName, resource, action string) bool {
+	t.Helper()
+	var count int64
+	require.NoError(t, db.Table("role_permissions rp").
+		Joins("JOIN custom_roles r ON r.id = rp.custom_role_id").
+		Joins("JOIN permissions p ON p.id = rp.permission_id").
+		Where("r.organization_id = ? AND r.name = ? AND r.is_system = ? AND p.resource = ? AND p.action = ?",
+			orgID, roleName, true, resource, action).
+		Count(&count).Error)
+	return count > 0
+}
+
+func TestSeedPermissionsAndRoles_GrantsNewPermissionsToExistingSystemRolesOnce(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+	org := models.Organization{BaseModel: models.BaseModel{ID: uuid.New()}, Name: "Upgrade Org", Settings: models.JSONB{}}
+	require.NoError(t, db.Create(&org).Error)
+	require.NoError(t, database.SeedSystemRolesForOrg(db, org.ID))
+
+	// Simulate an install from before message_logs:read existed.
+	var perm models.Permission
+	require.NoError(t, db.Where("resource = ? AND action = ?", models.ResourceMessageLogs, models.ActionRead).First(&perm).Error)
+	require.NoError(t, db.Exec("DELETE FROM role_permissions WHERE permission_id = ?", perm.ID).Error)
+	require.NoError(t, db.Unscoped().Delete(&perm).Error)
+
+	// Upgrade: the permission is created and granted per the role defaults.
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+	assert.True(t, roleHasPermission(t, db, org.ID, "admin", models.ResourceMessageLogs, models.ActionRead))
+	assert.True(t, roleHasPermission(t, db, org.ID, "manager", models.ResourceMessageLogs, models.ActionRead))
+	assert.False(t, roleHasPermission(t, db, org.ID, "agent", models.ResourceMessageLogs, models.ActionRead))
+
+	// An admin removes it from the manager role; restarts must not re-add it.
+	require.NoError(t, db.Exec(`DELETE FROM role_permissions WHERE permission_id IN
+		(SELECT id FROM permissions WHERE resource = ? AND action = ?) AND custom_role_id IN
+		(SELECT id FROM custom_roles WHERE organization_id = ? AND name = 'manager')`,
+		models.ResourceMessageLogs, models.ActionRead, org.ID).Error)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+	assert.False(t, roleHasPermission(t, db, org.ID, "manager", models.ResourceMessageLogs, models.ActionRead))
+}
+
+func TestCreateIndexes_BuildsMessageLogIndexesIdempotently(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	// CREATE INDEX CONCURRENTLY fails inside a transaction, so this also
+	// guards against the index statements ever being wrapped in one.
+	require.NoError(t, database.CreateIndexes(db))
+	require.NoError(t, database.CreateIndexes(db), "re-running must be a no-op")
+
+	for _, name := range []string{"idx_messages_org_created", "idx_messages_org_account_created", "idx_messages_org_status_created", "idx_messages_org_template_created"} {
+		var valid bool
+		require.NoError(t, db.Raw(`SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = ?`, name).Scan(&valid).Error)
+		assert.True(t, valid, "%s should exist and be valid", name)
+	}
+}

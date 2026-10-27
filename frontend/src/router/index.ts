@@ -29,6 +29,13 @@ const router = createRouter({
       meta: { requiresAuth: false }
     },
     {
+      // AI assistants send users here to approve access (OAuth consent)
+      path: '/oauth/consent',
+      name: 'oauth-consent',
+      component: () => import('@/views/oauth/ConsentView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/auth/sso/callback',
       name: 'sso-callback',
       component: () => import('@/views/auth/SSOCallbackView.vue'),
@@ -288,6 +295,30 @@ const router = createRouter({
           meta: { permission: 'custom_actions' }
         },
         {
+          path: 'message-logs',
+          name: 'message-logs',
+          component: () => import('@/views/message-logs/MessageLogsView.vue'),
+          meta: { permission: 'message_logs' }
+        },
+        {
+          path: 'downloads',
+          name: 'downloads',
+          component: () => import('@/views/downloads/DownloadsView.vue'),
+          meta: { permission: 'message_logs' }
+        },
+        {
+          path: 'settings/webhook-logs',
+          name: 'webhook-logs',
+          component: () => import('@/views/settings/WebhookLogsView.vue'),
+          meta: { permission: 'webhook_logs' }
+        },
+        {
+          path: 'settings/ai-assistants',
+          name: 'ai-assistants',
+          component: () => import('@/views/settings/AIAssistantsView.vue'),
+          meta: { permission: 'settings.general' }
+        },
+        {
           path: 'settings/audit-logs',
           name: 'audit-logs',
           component: () => import('@/views/settings/AuditLogsView.vue'),
@@ -354,6 +385,8 @@ const navigationOrder = [
   { path: '/templates', permission: 'templates' },
   { path: '/flows', permission: 'flows.whatsapp' },
   { path: '/campaigns', permission: 'campaigns' },
+  { path: '/message-logs', permission: 'message_logs' },
+  { path: '/downloads', permission: 'message_logs' },
   { path: '/calling/logs', permission: 'call_logs', childPaths: [
     { path: '/calling/logs', permission: 'call_logs' },
     { path: '/calling/ivr-flows', permission: 'ivr_flows' },
@@ -371,6 +404,7 @@ const navigationOrder = [
     { path: '/settings/roles', permission: 'roles' },
     { path: '/settings/api-keys', permission: 'api_keys' },
     { path: '/settings/webhooks', permission: 'webhooks' },
+    { path: '/settings/webhook-logs', permission: 'webhook_logs' },
     { path: '/settings/custom-actions', permission: 'custom_actions' },
     { path: '/settings/sso', permission: 'settings.sso' }
   ]}

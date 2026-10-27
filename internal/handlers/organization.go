@@ -32,6 +32,7 @@ func generalSettingsSnapshot(name string, settings models.JSONB) map[string]any 
 		"meta_app_id":         settings["meta_app_id"],
 		"meta_config_id":      settings["meta_config_id"],
 		"has_meta_app_secret": hasSecret,
+		"mcp_enabled":         settings["mcp_enabled"],
 	}
 }
 
@@ -60,6 +61,7 @@ type OrganizationSettings struct {
 	MetaAppID           string `json:"meta_app_id"`
 	MetaConfigID        string `json:"meta_config_id"`
 	HasMetaAppSecret    bool   `json:"has_meta_app_secret"`
+	MCPEnabled          bool   `json:"mcp_enabled"`
 }
 
 // GetOrganizationSettings returns the organization settings
@@ -120,6 +122,9 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		if v, ok := org.Settings["meta_app_secret_encrypted"].(string); ok && v != "" {
 			settings.HasMetaAppSecret = true
 		}
+		if v, ok := org.Settings["mcp_enabled"].(bool); ok {
+			settings.MCPEnabled = v
+		}
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -148,6 +153,7 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 		MetaAppID           *string `json:"meta_app_id"`
 		MetaConfigID        *string `json:"meta_config_id"`
 		MetaAppSecret       *string `json:"meta_app_secret"`
+		MCPEnabled          *bool   `json:"mcp_enabled"`
 	}
 
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
@@ -167,12 +173,19 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 		}
 	}
 
+	// Letting AI assistants act on the organization is an admin decision
+	if req.MCPEnabled != nil {
+		if err := a.requirePermission(r, userID, models.ResourceSettingsGeneral, models.ActionWrite); err != nil {
+			return nil
+		}
+	}
+
 	// Snapshot before mutation so we can compute per-tab diffs.
 	oldGeneral := generalSettingsSnapshot(org.Name, org.Settings)
 	oldCalling := callingSettingsSnapshot(org.Settings)
 
 	// Track which tabs received updates so we only audit the relevant ones.
-	generalTouched := req.MaskPhoneNumbers != nil || req.Timezone != nil || req.DateFormat != nil || (req.Name != nil && *req.Name != "") || metaAppCredsTouched
+	generalTouched := req.MaskPhoneNumbers != nil || req.Timezone != nil || req.DateFormat != nil || (req.Name != nil && *req.Name != "") || metaAppCredsTouched || req.MCPEnabled != nil
 	callingTouched := req.CallingEnabled != nil || req.MaxCallDuration != nil || req.TransferTimeoutSecs != nil || req.HoldMusicFile != nil || req.RingbackFile != nil
 
 	// Update settings
@@ -217,6 +230,9 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update settings", nil, "")
 		}
 		org.Settings["meta_app_secret_encrypted"] = encSecret
+	}
+	if req.MCPEnabled != nil {
+		org.Settings["mcp_enabled"] = *req.MCPEnabled
 	}
 	if req.Name != nil && *req.Name != "" {
 		org.Name = *req.Name

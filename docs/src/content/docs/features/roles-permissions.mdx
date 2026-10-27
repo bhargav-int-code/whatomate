@@ -104,6 +104,8 @@ This is the complete seeded catalogue — exactly the permissions returned by `G
 | `call_transfers` | read, write | Voice call transfers |
 | `outgoing_calls` | read, write | Outbound calling |
 | `audit_logs` | read | Audit trail (read-only) |
+| `message_logs` | read, export | Message delivery logs; `export` downloads them as CSV |
+| `webhook_logs` | read, delete | Webhook delivery logs; `delete` purges them |
 
 <Aside type="note">
   `settings.calling`, `settings.notification` and the `settings.chatbot.*` sub-resources
@@ -221,6 +223,8 @@ item and blocks navigation when the user lacks `<resource>:read`:
 | SSO | `settings.sso` |
 | Custom Actions | `custom_actions` |
 | Audit Logs | `audit_logs` |
+| Message Logs | `message_logs` |
+| Webhook Logs | `webhook_logs` |
 | Call Logs | `call_logs` |
 | IVR Flows | `ivr_flows` |
 | Call Transfers | `call_transfers` |

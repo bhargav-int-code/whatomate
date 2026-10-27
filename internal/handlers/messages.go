@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -99,6 +100,9 @@ type MessageSendOptions struct {
 	// successful send. Used for chatbot replies so a bot-handled exchange
 	// doesn't leave an "unread" badge in the agent's contact list.
 	MarkIncomingRead bool
+
+	// Source is recorded on the message for the delivery logs
+	Source models.MessageSource
 }
 
 // DefaultSendOptions returns options suitable for agent UI sends
@@ -108,6 +112,7 @@ func DefaultSendOptions() MessageSendOptions {
 		DispatchWebhook:    true,
 		TrackSLA:           false,
 		Async:              true,
+		Source:             models.MessageSourceAgent,
 	}
 }
 
@@ -119,6 +124,7 @@ func ChatbotSendOptions() MessageSendOptions {
 		TrackSLA:           true,
 		Async:              false,
 		MarkIncomingRead:   true,
+		Source:             models.MessageSourceChatbot,
 	}
 }
 
@@ -129,6 +135,7 @@ func APISendOptions() MessageSendOptions {
 		DispatchWebhook:    true,
 		TrackSLA:           false,
 		Async:              true,
+		Source:             models.MessageSourceAPI,
 	}
 }
 
@@ -139,7 +146,22 @@ func SLASendOptions() MessageSendOptions {
 		DispatchWebhook:    false,
 		TrackSLA:           false,
 		Async:              false, // Sync to ensure message is sent before continuing
+		Source:             models.MessageSourceAutomation,
 	}
+}
+
+// userSendOptions returns DefaultSendOptions for a send made on behalf of the
+// requesting user, recording it as an API send when the request authenticated
+// with an API key rather than a UI session.
+func userSendOptions(r *fastglue.Request, userID uuid.UUID) MessageSendOptions {
+	opts := DefaultSendOptions()
+	opts.SentByUserID = &userID
+	if _, ok := middleware.MCPClient(r); ok {
+		opts.Source = models.MessageSourceMCP
+	} else if middleware.IsAPIKeyAuth(r) {
+		opts.Source = models.MessageSourceAPI
+	}
+	return opts
 }
 
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
@@ -285,6 +307,7 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 		MessageType:     req.Type,
 		Status:          models.MessageStatusPending,
 		SentByUserID:    opts.SentByUserID,
+		Source:          opts.Source,
 	}
 
 	// Set content based on message type
@@ -437,6 +460,11 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 
+		a.dispatchMessageFailedWebhook(msg, req.Contact, MessageFailedEventData{
+			Source:       MessageFailureSourceSendError,
+			ErrorMessage: errMsg,
+		})
+
 		// Broadcast failure status via WebSocket so frontend updates immediately
 		if opts.BroadcastWebSocket && a.WSHub != nil {
 			a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
@@ -452,9 +480,12 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		return
 	}
 
+	// sent_at starts as the time Meta accepted the send; Meta's "sent" status
+	// callback replaces it with Meta's own timestamp.
 	a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
 		"status":               models.MessageStatusSent,
 		"whats_app_message_id": wamid,
+		"sent_at":              time.Now(),
 	})
 	a.Log.Info("Message sent", "message_id", msg.ID, "wa_message_id", wamid, "type", msg.MessageType)
 
@@ -581,6 +612,36 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 		Direction:       models.DirectionOutgoing,
 		SentByUserID:    sentByUserID,
 	})
+}
+
+// dispatchMessageFailedWebhook dispatches webhook for message.failed event.
+// Unlike message.sent it is not gated by MessageSendOptions.DispatchWebhook:
+// chatbot and SLA sends are suppressed for message.sent to avoid noise, but a
+// failure is always actionable. contact may be nil if it could not be loaded.
+// A ContactPhone already set on data (Meta's recipient_id) is kept; the
+// contact's stored phone is only a fallback.
+func (a *App) dispatchMessageFailedWebhook(msg *models.Message, contact *models.Contact, data MessageFailedEventData) {
+	data.MessageID = msg.ID.String()
+	data.WhatsAppMessageID = msg.WhatsAppMessageID
+	data.ContactID = msg.ContactID.String()
+	data.MessageType = msg.MessageType
+	data.Content = msg.Content
+	data.TemplateName = msg.TemplateName
+	data.WhatsAppAccount = msg.WhatsAppAccount
+	if msg.SentByUserID != nil {
+		data.SentByUserID = msg.SentByUserID.String()
+	}
+	if campaignID, ok := msg.Metadata["campaign_id"].(string); ok {
+		data.CampaignID = campaignID
+	}
+	if contact != nil {
+		if data.ContactPhone == "" {
+			data.ContactPhone = contact.PhoneNumber
+		}
+		data.ContactName = contact.ProfileName
+	}
+
+	a.DispatchWebhook(msg.OrganizationID, models.WebhookEventMessageFailed, data)
 }
 
 // updateContactLastMessage updates contact's last_message_at and preview
@@ -971,8 +1032,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		ButtonURLParams:     buttonParams,
 	}
 
-	opts := DefaultSendOptions()
-	opts.SentByUserID = &userID
+	opts := userSendOptions(r, userID)
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)

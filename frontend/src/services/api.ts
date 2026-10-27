@@ -722,6 +722,7 @@ export const organizationService = {
     meta_app_id?: string
     meta_config_id?: string
     meta_app_secret?: string
+    mcp_enabled?: boolean
   }) => api.put('/org/settings', data),
   uploadOrgAudio: (file: File, type: 'hold_music' | 'ringback') => {
     const formData = new FormData()
@@ -860,6 +861,197 @@ export const auditLogsService = {
     limit?: number
   }) =>
     api.get<{ audit_logs: AuditLogEntry[]; total: number }>('/audit-logs', { params }),
+}
+
+export type MessageLogStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | 'received'
+export type MessageLogSource = 'api' | 'mcp' | 'agent' | 'chatbot' | 'campaign' | 'automation' | 'phone_app' | 'incoming' | 'call'
+
+export interface MessageLog {
+  id: string
+  created_at: string
+  direction: 'incoming' | 'outgoing'
+  // Empty for messages created before message logs existed
+  source: MessageLogSource | ''
+  status: MessageLogStatus
+  sent_at: string | null
+  delivered_at: string | null
+  read_at: string | null
+  contact_id: string
+  contact_name: string
+  contact_phone: string
+  whatsapp_account: string
+  message_type: string
+  template_name: string
+  // Truncated to 200 characters in list responses
+  content: string
+  error_message: string
+  pricing_category: string
+  campaign_id: string
+  campaign_name: string
+  whatsapp_message_id: string
+  // Detail response only
+  sent_by_user_id?: string
+  sent_by_user_name?: string
+}
+
+export interface MessageLogListParams {
+  from: string
+  to: string
+  account?: string
+  status?: MessageLogStatus
+  direction?: 'incoming' | 'outgoing'
+  source?: MessageLogSource
+  template?: string
+  phone?: string
+  cursor?: string
+  dir?: 'older' | 'newer'
+}
+
+export const messageLogsService = {
+  list: (params: MessageLogListParams) =>
+    api.get<{ logs: MessageLog[]; next_cursor: string; prev_cursor: string; limit: number }>('/message-logs', { params }),
+  get: (id: string) => api.get<MessageLog>(`/message-logs/${id}`),
+  // Queues a background export of the logs matching the filters
+  export: (params: Omit<MessageLogListParams, 'cursor' | 'dir'> & { timezone: string }) =>
+    api.post<ExportJob>('/message-logs/exports', params),
+}
+
+export type ExportStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'expired'
+
+export interface ExportJob {
+  id: string
+  type: 'message_logs'
+  status: ExportStatus
+  filters: Record<string, string>
+  timezone: string
+  row_count: number
+  file_size: number
+  file_name: string
+  error?: string
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  expires_at: string | null
+}
+
+// Sent over WebSocket when an export finishes
+export interface ExportUpdate {
+  export_id: string
+  status: 'completed' | 'failed'
+  file_name?: string
+  row_count: number
+  error?: string
+}
+
+export type MCPScope = 'messages:read' | 'messages:send' | 'campaigns:read' | 'campaigns:write' | 'webhooks:read'
+
+export const MCP_SCOPES: MCPScope[] = ['messages:read', 'messages:send', 'campaigns:read', 'campaigns:write', 'webhooks:read']
+
+// An AI assistant a user connected with OAuth
+export interface MCPConnection {
+  id: string
+  client_name: string
+  client_id: string
+  scopes: MCPScope[]
+  organization_id: string
+  organization_name: string
+  user_id: string
+  user_name: string
+  user_email: string
+  created_at: string
+  last_used_at?: string
+}
+
+// A pending request from an AI assistant, shown on the consent page
+export interface OAuthConsentRequest {
+  id: string
+  client_name: string
+  client_uri?: string
+  logo_uri?: string
+  redirect_host: string
+  scopes: MCPScope[]
+  organizations: { id: string; name: string; mcp_enabled: boolean; is_current: boolean }[]
+}
+
+export const mcpService = {
+  // The MCP endpoint AI assistants connect to
+  endpointUrl: () => `${window.location.origin}${basePath}/mcp`,
+  listConnections: () => api.get<{ connections: MCPConnection[] }>('/mcp/connections'),
+  revokeConnection: (id: string) => api.delete(`/mcp/connections/${id}`),
+  listMyConnections: () => api.get<{ connections: MCPConnection[] }>('/me/connected-apps'),
+  revokeMyConnection: (id: string) => api.delete(`/me/connected-apps/${id}`),
+  getConsentRequest: (id: string) => api.get<OAuthConsentRequest>(`/oauth/requests/${id}`),
+  approve: (id: string, data: { organization_id: string; scopes: MCPScope[] }) =>
+    api.post<{ redirect_url: string }>(`/oauth/requests/${id}/approve`, data),
+  deny: (id: string) => api.post<{ redirect_url: string }>(`/oauth/requests/${id}/deny`),
+}
+
+export const exportsService = {
+  list: () => api.get<{ exports: ExportJob[] }>('/exports'),
+  delete: (id: string) => api.delete(`/exports/${id}`),
+  // Downloads are plain navigations so the browser streams large files to
+  // disk instead of buffering them in memory.
+  downloadUrl: (id: string) => `${API_BASE_URL}/exports/${id}/download`,
+}
+
+export type WebhookDeliveryStatus = 'processing' | 'success' | 'failed'
+
+export interface WebhookLog {
+  id: string
+  created_at: string
+  webhook_id: string
+  // Copied at delivery time, so it survives renames and deletes
+  webhook_name: string
+  event: string
+  // The message, contact or transfer the event is about
+  reference_id: string
+  contact_phone: string
+  status: WebhookDeliveryStatus
+  attempt_count: number
+  // 0 when no response was received
+  response_status: number
+  failure_reason: string
+  duration_ms: number
+  completed_at: string | null
+}
+
+export interface WebhookLogAttempt {
+  attempt: number
+  at: string
+  status_code: number
+  duration_ms: number
+  error: string
+}
+
+export interface WebhookLogDetail extends WebhookLog {
+  request: {
+    method: string
+    url: string
+    headers: Record<string, string>
+    body: unknown
+  }
+  response?: { status_code: number; body: string }
+  attempts: WebhookLogAttempt[]
+}
+
+export interface WebhookLogListParams {
+  from: string
+  to: string
+  webhook_id?: string
+  event?: string
+  status?: WebhookDeliveryStatus
+  search?: string
+  cursor?: string
+  dir?: 'older' | 'newer'
+}
+
+export const webhookLogsService = {
+  list: (params: WebhookLogListParams) =>
+    api.get<{ logs: WebhookLog[]; next_cursor: string; prev_cursor: string; limit: number }>('/webhook-logs', { params }),
+  get: (id: string) => api.get<WebhookLogDetail>(`/webhook-logs/${id}`),
+  // Without confirm, only reports how many deliveries match
+  purge: (data: { before: string; webhook_id?: string; confirm: boolean }) =>
+    api.post<{ matching: number; started: boolean }>('/webhook-logs/purge', data),
 }
 
 export const webhooksService = {

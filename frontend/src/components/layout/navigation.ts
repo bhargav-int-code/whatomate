@@ -21,7 +21,11 @@ import {
   Tags,
   PhoneCall,
   PhoneForwarded,
-  ScrollText
+  ScrollText,
+  ListChecks,
+  Activity,
+  FolderDown,
+  Plug
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -64,7 +68,7 @@ export const navigationSections: NavSection[] = [
   },
   {
     label: 'nav.sectionMessaging',
-    permissions: ['settings.chatbot', 'chatbot.keywords', 'flows.chatbot', 'chatbot.ai', 'transfers', 'campaigns', 'templates', 'flows.whatsapp'],
+    permissions: ['settings.chatbot', 'chatbot.keywords', 'flows.chatbot', 'chatbot.ai', 'transfers', 'campaigns', 'templates', 'flows.whatsapp', 'message_logs'],
     items: [
       {
         name: 'nav.chatbot',
@@ -98,6 +102,18 @@ export const navigationSections: NavSection[] = [
         icon: Workflow,
         permission: 'flows.whatsapp'
       },
+      {
+        name: 'nav.messageLogs',
+        path: '/message-logs',
+        icon: ListChecks,
+        permission: 'message_logs'
+      },
+      {
+        name: 'nav.downloads',
+        path: '/downloads',
+        icon: FolderDown,
+        permission: 'message_logs'
+      },
     ]
   },
   {
@@ -129,7 +145,7 @@ export const navigationSections: NavSection[] = [
   },
   {
     label: '',
-    permissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'settings.sso', 'audit_logs'],
+    permissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'settings.sso', 'audit_logs', 'webhook_logs'],
     pinBottom: true,
     items: [
       {
@@ -137,7 +153,7 @@ export const navigationSections: NavSection[] = [
         path: '/settings',
         icon: Settings,
         permission: 'settings.general',
-        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'settings.sso', 'audit_logs'],
+        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'settings.sso', 'audit_logs', 'webhook_logs'],
         children: [
           { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
           { name: 'nav.chatbot', path: '/settings/chatbot', icon: Bot, permission: 'settings.chatbot' },
@@ -150,6 +166,8 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.roles', path: '/settings/roles', icon: Shield, permission: 'roles' },
           { name: 'nav.apiKeys', path: '/settings/api-keys', icon: Key, permission: 'api_keys' },
           { name: 'nav.webhooks', path: '/settings/webhooks', icon: Webhook, permission: 'webhooks' },
+          { name: 'nav.webhookLogs', path: '/settings/webhook-logs', icon: Activity, permission: 'webhook_logs' },
+          { name: 'nav.aiAssistants', path: '/settings/ai-assistants', icon: Plug, permission: 'settings.general' },
           { name: 'nav.customActions', path: '/settings/custom-actions', icon: Zap, permission: 'custom_actions' },
           { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
           { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }

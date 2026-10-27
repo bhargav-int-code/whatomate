@@ -34,7 +34,8 @@ GET /api/org/settings
       "ringback_file": "",
       "meta_app_id": "",
       "meta_config_id": "",
-      "has_meta_app_secret": false
+      "has_meta_app_secret": false,
+      "mcp_enabled": false
     },
     "name": "Acme Inc"
   }
@@ -53,6 +54,7 @@ GET /api/org/settings
 | `meta_app_id` | string | Meta App ID for embedded signup. |
 | `meta_config_id` | string | Meta configuration ID for embedded signup. |
 | `has_meta_app_secret` | boolean | Read-only flag; `true` when a Meta app secret is stored. The secret itself is encrypted at rest and never returned. |
+| `mcp_enabled` | boolean | Whether AI assistants may connect through the [MCP server](/whatomate/features/mcp). Default `false`. |
 
 **Calling**
 
@@ -87,7 +89,8 @@ PUT /api/org/settings
   "ringback_file": "org_<id>_ringback.ogg",
   "meta_app_id": "123456789",
   "meta_config_id": "987654321",
-  "meta_app_secret": "your-app-secret"
+  "meta_app_secret": "your-app-secret",
+  "mcp_enabled": true
 }
 ```
 
@@ -105,9 +108,10 @@ PUT /api/org/settings
 | `meta_app_id` | string | Meta App ID. |
 | `meta_config_id` | string | Meta configuration ID. |
 | `meta_app_secret` | string | Meta app secret; encrypted at rest. Ignored if empty. |
+| `mcp_enabled` | boolean | Allow or block AI assistants (MCP). Blocking takes effect immediately for every connection. |
 
 <Aside type="note">
-  Setting any of `meta_app_id`, `meta_config_id`, or `meta_app_secret` additionally requires the `accounts:write` permission. Changes are recorded to the audit trail as `settings.general` and `settings.calling` entries.
+  Setting any of `meta_app_id`, `meta_config_id`, or `meta_app_secret` additionally requires the `accounts:write` permission, and setting `mcp_enabled` requires `settings.general:write`. Changes are recorded to the audit trail as `settings.general` and `settings.calling` entries.
 </Aside>
 
 ### Response

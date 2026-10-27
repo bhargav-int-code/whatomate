@@ -17,6 +17,7 @@ read_timeout = 30
 write_timeout = 30
 base_path = ""  # Set to "/subpath" if behind nginx proxy pass
 allowed_origins = ""  # Comma-separated CORS origins (e.g., "https://app.example.com,https://admin.example.com"). Empty = allow all (dev only).
+public_url = ""  # Public origin, e.g. "https://wa.example.com" (no trailing slash). Used by the MCP server; empty = derived from the request's Host header.
 
 [database]
 host = "db"  # Use "localhost" for local development

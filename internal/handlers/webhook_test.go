@@ -5,6 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -264,7 +269,7 @@ func TestUpdateMessageStatus_DeliveredUpdatesRecipient(t *testing.T) {
 	app := webhookTestApp(t)
 	_, msg, campaign, recipient := webhookTestData(t, app, models.MessageStatusSent)
 
-	app.updateMessageStatus(msg.WhatsAppMessageID, "delivered", nil)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "delivered"})
 
 	// Verify recipient status and delivered_at
 	var updated models.BulkMessageRecipient
@@ -283,7 +288,7 @@ func TestUpdateMessageStatus_ReadUpdatesRecipient(t *testing.T) {
 	app := webhookTestApp(t)
 	_, msg, campaign, recipient := webhookTestData(t, app, models.MessageStatusDelivered)
 
-	app.updateMessageStatus(msg.WhatsAppMessageID, "read", nil)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "read"})
 
 	// Verify recipient status and read_at
 	var updated models.BulkMessageRecipient
@@ -332,7 +337,7 @@ func TestUpdateMessageStatus_NonCampaignMessageIgnoresRecipient(t *testing.T) {
 	require.NoError(t, app.DB.Create(&msg).Error)
 
 	// Should update message status but not panic or fail
-	app.updateMessageStatus(waMsgID, "delivered", nil)
+	app.updateMessageStatus(WebhookStatus{ID: waMsgID, Status: "delivered"})
 
 	var updated models.Message
 	require.NoError(t, app.DB.First(&updated, msg.ID).Error)
@@ -344,7 +349,7 @@ func TestUpdateMessageStatus_StatusPriorityRespected(t *testing.T) {
 	_, msg, _, recipient := webhookTestData(t, app, models.MessageStatusRead)
 
 	// Attempt to downgrade from read -> delivered (should be ignored)
-	app.updateMessageStatus(msg.WhatsAppMessageID, "delivered", nil)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "delivered"})
 
 	var updated models.BulkMessageRecipient
 	require.NoError(t, app.DB.First(&updated, recipient.ID).Error)
@@ -359,7 +364,7 @@ func TestUpdateMessageStatus_FailedUpdatesMessage(t *testing.T) {
 	errors := []WebhookStatusError{
 		{Code: 131047, Title: "Re-engagement message", Message: "Message failed to send because more than 24 hours have passed"},
 	}
-	app.updateMessageStatus(msg.WhatsAppMessageID, "failed", errors)
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", Errors: errors})
 
 	// Verify message status and error
 	var updatedMsg models.Message
@@ -386,10 +391,18 @@ func TestUpdateMessageStatus_FailedBroadcastsErrorMessageViaWebSocket(t *testing
 	hub := websocket.NewHub(log)
 	go hub.Run()
 
+	// A failed status also dispatches message.failed, which reads the
+	// webhook config through the Redis cache.
+	redisClient := testutil.SetupTestRedis(t)
+	if redisClient == nil {
+		t.Skip("TEST_REDIS_URL not set, skipping test")
+	}
+
 	app := &App{
 		DB:    db,
 		Log:   log,
 		WSHub: hub,
+		Redis: redisClient,
 	}
 
 	uid := uuid.New().String()[:8]
@@ -441,7 +454,7 @@ func TestUpdateMessageStatus_FailedBroadcastsErrorMessageViaWebSocket(t *testing
 	errors := []WebhookStatusError{
 		{Code: 131047, Title: "Re-engagement message", Message: "This message was not delivered to maintain healthy ecosystem engagement."},
 	}
-	app.updateMessageStatus(waMsgID, "failed", errors)
+	app.updateMessageStatus(WebhookStatus{ID: waMsgID, Status: "failed", Errors: errors})
 
 	// Read from the client's send channel and verify the WS broadcast
 	select {
@@ -517,7 +530,7 @@ func TestUpdateMessageStatus_DeliveredBroadcastsViaWebSocket_NoErrorMessage(t *t
 	require.Equal(t, 1, hub.GetClientCount())
 
 	// Trigger a delivered status update (no errors)
-	app.updateMessageStatus(waMsgID, "delivered", nil)
+	app.updateMessageStatus(WebhookStatus{ID: waMsgID, Status: "delivered"})
 
 	// Read from the client's send channel and verify NO error_message
 	select {
@@ -704,4 +717,173 @@ func TestWebhookHandler_smb_app_state_sync(t *testing.T) {
 	err := app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "9199997777").First(&checkDeleted).Error
 	assert.Error(t, err, "contact should have been soft-deleted and not found by standard query")
 	assert.True(t, checkUnscoped.DeletedAt.Valid, "DeletedAt should be populated")
+}
+
+// captureMessageFailedWebhooks registers a message.failed webhook for the org
+// pointing at a local test server and returns a function that reports every
+// payload delivered so far. Call app.WaitForBackgroundTasks() before reading.
+func captureMessageFailedWebhooks(t *testing.T, app *App, orgID uuid.UUID) func() []OutboundWebhookPayload {
+	t.Helper()
+
+	var mu sync.Mutex
+	var bodies [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read webhook body: %v", err)
+		}
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	app.HTTPClient = &http.Client{Timeout: 5 * time.Second}
+	require.NoError(t, app.DB.Create(&models.Webhook{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: orgID,
+		Name:           "test-message-failed-webhook",
+		URL:            server.URL,
+		Events:         models.StringArray{string(models.WebhookEventMessageFailed)},
+		IsActive:       true,
+	}).Error)
+
+	return func() []OutboundWebhookPayload {
+		mu.Lock()
+		defer mu.Unlock()
+		payloads := make([]OutboundWebhookPayload, 0, len(bodies))
+		for _, b := range bodies {
+			var p OutboundWebhookPayload
+			require.NoError(t, json.Unmarshal(b, &p))
+			payloads = append(payloads, p)
+		}
+		return payloads
+	}
+}
+
+func TestUpdateMessageStatus_FailedDispatchesMessageFailedWebhook(t *testing.T) {
+	app := webhookTestApp(t)
+	org, msg, campaign, _ := webhookTestData(t, app, models.MessageStatusSent)
+	delivered := captureMessageFailedWebhooks(t, app, org.ID)
+
+	statusErrors := []WebhookStatusError{
+		{Code: 131047, Title: "Re-engagement message", Message: "Message failed to send because more than 24 hours have passed"},
+	}
+	statusErrors[0].ErrorData.Details = "Message failed to send because more than 24 hours have passed since the customer last replied"
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", Errors: statusErrors})
+	app.WaitForBackgroundTasks()
+
+	payloads := delivered()
+	require.Len(t, payloads, 1)
+	assert.Equal(t, string(models.WebhookEventMessageFailed), payloads[0].Event)
+
+	data, ok := payloads[0].Data.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, msg.ID.String(), data["message_id"])
+	assert.Equal(t, msg.WhatsAppMessageID, data["whatsapp_message_id"])
+	assert.Equal(t, msg.ContactID.String(), data["contact_id"])
+	assert.NotEmpty(t, data["contact_phone"])
+	assert.Equal(t, campaign.ID.String(), data["campaign_id"])
+	assert.Equal(t, MessageFailureSourceStatusCallback, data["source"])
+	assert.EqualValues(t, 131047, data["error_code"])
+	assert.Equal(t, "Re-engagement message", data["error_title"])
+	assert.Contains(t, data["error_message"], "since the customer last replied")
+	assert.Contains(t, data["error_details"], "since the customer last replied")
+}
+
+func TestUpdateMessageStatus_RepeatedFailedDoesNotRedispatch(t *testing.T) {
+	app := webhookTestApp(t)
+	org, msg, _, _ := webhookTestData(t, app, models.MessageStatusFailed)
+	delivered := captureMessageFailedWebhooks(t, app, org.ID)
+
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", Errors: []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}}})
+	app.WaitForBackgroundTasks()
+
+	assert.Empty(t, delivered(), "a redelivered failed status must not fire message.failed again")
+}
+
+func TestUpdateMessageStatus_DeliveredDoesNotDispatchMessageFailedWebhook(t *testing.T) {
+	app := webhookTestApp(t)
+	org, msg, _, _ := webhookTestData(t, app, models.MessageStatusSent)
+	delivered := captureMessageFailedWebhooks(t, app, org.ID)
+
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "delivered"})
+	app.WaitForBackgroundTasks()
+
+	assert.Empty(t, delivered())
+}
+
+func TestFinalizeMessageSend_SendErrorDispatchesMessageFailedWebhook(t *testing.T) {
+	app := webhookTestApp(t)
+	org, msg, _, _ := webhookTestData(t, app, models.MessageStatusPending)
+	delivered := captureMessageFailedWebhooks(t, app, org.ID)
+
+	var contact models.Contact
+	require.NoError(t, app.DB.First(&contact, msg.ContactID).Error)
+	account := models.WhatsAppAccount{OrganizationID: org.ID, Name: msg.WhatsAppAccount}
+
+	// Chatbot sends suppress message.sent, but failures must still be reported.
+	opts := ChatbotSendOptions()
+	require.False(t, opts.DispatchWebhook)
+
+	sendErr := errors.New("API error 131030: Recipient phone number not in allowed list")
+	app.finalizeMessageSend(&msg, OutgoingMessageRequest{Account: &account, Contact: &contact}, opts, "", sendErr)
+	app.WaitForBackgroundTasks()
+
+	var updated models.Message
+	require.NoError(t, app.DB.First(&updated, msg.ID).Error)
+	assert.Equal(t, models.MessageStatusFailed, updated.Status)
+
+	payloads := delivered()
+	require.Len(t, payloads, 1)
+	data, ok := payloads[0].Data.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, msg.ID.String(), data["message_id"])
+	assert.Equal(t, MessageFailureSourceSendError, data["source"])
+	assert.Equal(t, sendErr.Error(), data["error_message"])
+	assert.Equal(t, contact.PhoneNumber, data["contact_phone"])
+	assert.NotContains(t, data, "error_code")
+}
+
+func TestUpdateMessageStatus_FailedWebhookPrefersMetaRecipientPhone(t *testing.T) {
+	app := webhookTestApp(t)
+	org, msg, _, _ := webhookTestData(t, app, models.MessageStatusSent)
+	delivered := captureMessageFailedWebhooks(t, app, org.ID)
+
+	var contact models.Contact
+	require.NoError(t, app.DB.First(&contact, msg.ContactID).Error)
+	metaPhone := "15550001111"
+	require.NotEqual(t, contact.PhoneNumber, metaPhone)
+
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", RecipientID: metaPhone, Errors: []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}}})
+	app.WaitForBackgroundTasks()
+
+	payloads := delivered()
+	require.Len(t, payloads, 1)
+	data, ok := payloads[0].Data.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, metaPhone, data["contact_phone"], "Meta's recipient_id must win over the stored contact phone")
+	assert.Equal(t, contact.ProfileName, data["contact_name"])
+}
+
+func TestUpdateMessageStatus_FailedWebhookKeepsPhoneWhenContactDeleted(t *testing.T) {
+	app := webhookTestApp(t)
+	org, msg, _, _ := webhookTestData(t, app, models.MessageStatusSent)
+	delivered := captureMessageFailedWebhooks(t, app, org.ID)
+
+	var contact models.Contact
+	require.NoError(t, app.DB.First(&contact, msg.ContactID).Error)
+	require.NoError(t, app.DB.Delete(&contact).Error)
+
+	app.updateMessageStatus(WebhookStatus{ID: msg.WhatsAppMessageID, Status: "failed", RecipientID: contact.PhoneNumber, Errors: []WebhookStatusError{{Code: 131026, Title: "Message undeliverable"}}})
+	app.WaitForBackgroundTasks()
+
+	payloads := delivered()
+	require.Len(t, payloads, 1)
+	data, ok := payloads[0].Data.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, contact.PhoneNumber, data["contact_phone"])
+	assert.Equal(t, msg.ContactID.String(), data["contact_id"])
+	assert.Empty(t, data["contact_name"], "name is only known from the contact row")
 }

@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { CalendarIcon } from 'lucide-vue-next'
-import { today, getLocalTimeZone } from '@internationalized/date'
+import { today, getLocalTimeZone, type DateValue } from '@internationalized/date'
 import type { TimeRangePreset } from '@/composables/useDateRange'
 
 const props = defineProps<{
@@ -19,6 +19,8 @@ const props = defineProps<{
   customDateRange: any
   isDatePickerOpen: boolean
   formatDateRangeDisplay: string
+  // Earliest selectable day for a custom range (e.g. a data retention window)
+  minDate?: DateValue
 }>()
 
 const emit = defineEmits<{
@@ -68,6 +70,7 @@ const maxDate = today(getLocalTimeZone())
           @update:model-value="emit('update:customDateRange', $event)"
           :number-of-months="2"
           :max-value="maxDate"
+          :min-value="props.minDate"
         />
         <Button
           class="w-full"

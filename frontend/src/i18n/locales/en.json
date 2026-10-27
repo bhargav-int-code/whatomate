@@ -278,7 +278,11 @@
     "skipToMain": "Skip to main content",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
-    "toggleMenu": "Toggle menu"
+    "toggleMenu": "Toggle menu",
+    "messageLogs": "Message Logs",
+    "webhookLogs": "Webhook Logs",
+    "downloads": "Downloads",
+    "aiAssistants": "AI Assistants"
   },
   "userMenu": {
     "myAccount": "My Account",
@@ -1182,6 +1186,173 @@
     "resourceType": "Resource Type",
     "viewResource": "View Resource"
   },
+  "messageLogs": {
+    "title": "Message Logs",
+    "description": "Track every message sent and received, with delivery status and failure reasons.",
+    "allMessages": "All Messages",
+    "allMessagesDesc": "Incoming and outgoing messages from the last {days} days. Click a row for details.",
+    "allAccounts": "All Accounts",
+    "allStatuses": "All Statuses",
+    "allDirections": "All Directions",
+    "allSources": "All Sources",
+    "allTemplates": "All Templates",
+    "searchTemplate": "Search templates...",
+    "noTemplateFound": "No template found.",
+    "phonePlaceholder": "Customer number",
+    "noLogs": "No messages found.",
+    "noLogsDesc": "Try a different date range or clear the filters.",
+    "loadFailed": "Failed to load message logs",
+    "newer": "Newer",
+    "older": "Older",
+    "perPage": "{count} per page",
+    "columns": {
+      "time": "Time",
+      "customer": "Customer",
+      "direction": "Direction",
+      "status": "Status",
+      "template": "Template",
+      "source": "Source",
+      "content": "Content"
+    },
+    "directions": {
+      "incoming": "Incoming",
+      "outgoing": "Outgoing"
+    },
+    "statuses": {
+      "pending": "Pending",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "read": "Read",
+      "failed": "Failed",
+      "received": "Received"
+    },
+    "sources": {
+      "api": "API",
+      "mcp": "AI Assistant",
+      "agent": "Agent",
+      "chatbot": "Chatbot",
+      "campaign": "Campaign",
+      "automation": "Automation",
+      "phone_app": "Phone App",
+      "incoming": "Customer",
+      "call": "Call",
+      "unknown": "Unknown"
+    },
+    "detail": {
+      "title": "Message Details",
+      "timeline": "Delivery Timeline",
+      "created": "Created",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "read": "Read",
+      "failureReason": "Failure Reason",
+      "account": "WhatsApp Account",
+      "messageType": "Message Type",
+      "campaign": "Campaign",
+      "pricingCategory": "Pricing Category",
+      "sentBy": "Sent By",
+      "whatsappMessageId": "WhatsApp Message ID",
+      "openConversation": "Open Conversation"
+    }
+  },
+  "webhookLogs": {
+    "title": "Webhook Logs",
+    "description": "Every event sent to your webhooks, with each attempt and the exact request and response.",
+    "allDeliveries": "All Deliveries",
+    "allDeliveriesDesc": "Webhook deliveries from the last {days} days. Click a row for the request and response.",
+    "allWebhooks": "All Webhooks",
+    "allEvents": "All Events",
+    "allStatuses": "All Statuses",
+    "searchPlaceholder": "Reference ID or customer number",
+    "noLogs": "No webhook deliveries found.",
+    "noLogsDesc": "Try a different date range or clear the filters.",
+    "loadFailed": "Failed to load webhook logs",
+    "newer": "Newer",
+    "older": "Older",
+    "perPage": "{count} per page",
+    "attemptCount": "1 attempt | {count} attempts",
+    "recentDeliveries": "Recent Deliveries",
+    "viewAll": "View all",
+    "noRecentDeliveries": "No deliveries in the last {days} days.",
+    "columns": {
+      "time": "Time",
+      "webhook": "Webhook",
+      "event": "Event",
+      "status": "Status",
+      "attempts": "Attempts",
+      "reference": "Reference"
+    },
+    "statuses": {
+      "success": "Success",
+      "failed": "Failed",
+      "processing": "Processing"
+    },
+    "detail": {
+      "title": "Webhook Delivery",
+      "failureReason": "Failure Reason",
+      "customer": "Customer",
+      "completed": "Completed",
+      "attempts": "Attempts",
+      "attemptN": "Attempt {n}",
+      "noResponse": "No response",
+      "request": "Request",
+      "response": "Response",
+      "statusCode": "HTTP {code}",
+      "emptyBody": "Empty body",
+      "noResponseReceived": "No response was received."
+    },
+    "purge": {
+      "button": "Purge Logs",
+      "title": "Purge Webhook Logs",
+      "description": "Permanently delete webhook deliveries created before a date. Only logs older than {days} days can be purged.",
+      "before": "Delete deliveries before",
+      "willDelete": "{count} deliveries from {webhook} before {date} will be permanently deleted.",
+      "nothingToDelete": "No deliveries match. Nothing will be deleted.",
+      "check": "Check",
+      "confirm": "Delete {count} deliveries",
+      "started": "Purge started: {count} deliveries are being deleted",
+      "failed": "Failed to purge webhook logs"
+    }
+  },
+  "exports": {
+    "title": "Downloads",
+    "description": "Exports you've requested. Files are kept for 7 days.",
+    "yourExports": "Your Exports",
+    "yourExportsDesc": "Exports run in the background; this page updates when they finish.",
+    "empty": "No exports yet.",
+    "emptyDesc": "Use Export on the Message Logs page to download logs as CSV.",
+    "loadFailed": "Failed to load exports",
+    "deleteFailed": "Failed to delete export",
+    "deleteTitle": "Delete Export",
+    "deleteDescription": "The file will be deleted. You can request the export again.",
+    "exportButton": "Export",
+    "startedTitle": "Export started",
+    "startedDescription": "We'll let you know when the file is ready to download.",
+    "startFailed": "Failed to start export",
+    "readyTitle": "Export ready",
+    "readyDescription": "{file} ({count} messages) is ready to download.",
+    "failedTitle": "Export failed",
+    "viewDownloads": "View Downloads",
+    "columns": {
+      "file": "File",
+      "filters": "Filters",
+      "rows": "Rows",
+      "size": "Size",
+      "status": "Status",
+      "requested": "Requested",
+      "expires": "Expires"
+    },
+    "statuses": {
+      "queued": "Queued",
+      "processing": "Processing",
+      "completed": "Ready",
+      "failed": "Failed",
+      "expired": "Expired"
+    },
+    "types": {
+      "message_logs": "Message logs"
+    }
+  },
   "customActions": {
     "title": "Custom Actions",
     "subtitle": "Configure custom action buttons for chat integrations",
@@ -1280,7 +1451,10 @@
     "passwordMismatch": "New passwords do not match",
     "passwordTooShort": "New password must be at least 6 characters",
     "passwordChanged": "Password changed successfully",
-    "passwordChangeFailed": "Failed to change password"
+    "passwordChangeFailed": "Failed to change password",
+    "connectedApps": "Connected AI assistants",
+    "connectedAppsDesc": "AI assistants you let act on your behalf. Disconnecting one stops it immediately.",
+    "noConnectedApps": "You have not connected any AI assistants."
   },
   "accounts": {
     "metaConnectionDetails": "Details",
@@ -2563,5 +2737,92 @@
     "callFailed": "Failed to initiate call",
     "permissionSent": "Call permission request sent",
     "permissionSentDesc": "The contact needs to accept the call permission on WhatsApp before you can call them. Try again after they accept."
+  },
+  "mcp": {
+    "title": "AI Assistants",
+    "description": "Let Claude, ChatGPT and other AI assistants work with WhatsApp through the Model Context Protocol (MCP).",
+    "access": "Access",
+    "accessDesc": "When on, people in this organization can connect an AI assistant to their own account. Assistants can only do what that person's role allows, limited further to the permissions they approve.",
+    "enable": "Allow AI assistants",
+    "enableDesc": "Turning this off blocks every connected assistant until it is turned back on.",
+    "enabled": "AI assistant access turned on",
+    "disabled": "AI assistant access turned off",
+    "saveFailed": "Failed to update AI assistant access",
+    "loadFailed": "Failed to load settings",
+    "adminOnly": "Only admins can change this.",
+    "connect": "Connect an assistant",
+    "connectDesc": "Each person connects with their own Whatomate login and chooses what the assistant may do.",
+    "serverUrl": "MCP server URL",
+    "copy": "Copy",
+    "copied": "Copied to clipboard",
+    "guides": {
+      "claude": "Claude (claude.ai and desktop)",
+      "claudeSteps": "Open Settings → Connectors → Add custom connector, paste the server URL, then sign in to Whatomate and approve.",
+      "chatgpt": "ChatGPT",
+      "chatgptSteps": "Open Settings → Apps & Connectors, turn on Developer mode under Advanced, create a connector with the server URL and OAuth authentication, then sign in to Whatomate and approve.",
+      "claudeCode": "Claude Code",
+      "claudeCodeSteps": "Run this command, then type /mcp in Claude Code to sign in:",
+      "publicUrlNote": "Assistants such as Claude.ai and ChatGPT connect from the internet, so this URL must be reachable publicly over HTTPS. If it shows a local address, set server.public_url in the config."
+    },
+    "scopes": {
+      "messages:read": {
+        "label": "Read messages",
+        "desc": "Contacts, conversations, templates, message logs and stats"
+      },
+      "messages:send": {
+        "label": "Send messages",
+        "desc": "Send WhatsApp messages and templates, create and tag contacts"
+      },
+      "campaigns:read": {
+        "label": "View campaigns",
+        "desc": "Campaigns, their recipients and delivery results"
+      },
+      "campaigns:write": {
+        "label": "Run campaigns",
+        "desc": "Create campaigns, add recipients, start, pause and cancel them"
+      },
+      "webhooks:read": {
+        "label": "Read webhook logs",
+        "desc": "Deliveries of your outbound webhooks"
+      }
+    },
+    "connections": "Connected assistants",
+    "connectionsDesc": "Every AI assistant connected to this organization.",
+    "noConnections": "No assistants are connected yet.",
+    "noConnectionsDesc": "Connections appear here once someone approves an assistant.",
+    "columns": {
+      "app": "Assistant",
+      "user": "Connected by",
+      "permissions": "Permissions",
+      "connected": "Connected",
+      "lastUsed": "Last used",
+      "organization": "Organization"
+    },
+    "never": "Never",
+    "disconnect": "Disconnect",
+    "disconnectTitle": "Disconnect this assistant?",
+    "disconnectDesc": "It loses access immediately. Reconnecting needs a new approval.",
+    "disconnected": "Assistant disconnected",
+    "disconnectFailed": "Failed to disconnect",
+    "connectionsLoadFailed": "Failed to load connected assistants"
+  },
+  "oauthConsent": {
+    "title": "{app} wants to access Whatomate",
+    "signedInAs": "Signed in as {email}",
+    "organization": "Organization",
+    "accessOff": "AI access off",
+    "orgDisabled": "AI assistant access is turned off for {org}. Ask an admin to turn it on in Settings → AI Assistants.",
+    "permissions": "Allow it to",
+    "roleNote": "It can only do what your role allows. You can disconnect it any time from your profile.",
+    "redirectNote": "You will be sent back to {host}.",
+    "allow": "Allow",
+    "deny": "Deny",
+    "chooseScope": "Choose at least one permission",
+    "notFound": "This request has expired or was already answered.",
+    "notFoundDesc": "Start connecting again from your AI assistant.",
+    "failed": "Could not complete the connection",
+    "redirecting": "Returning you to {app}…",
+    "unnamedApp": "This app",
+    "appWebsite": "Visit app website"
   }
 }

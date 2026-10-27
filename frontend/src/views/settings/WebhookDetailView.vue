@@ -3,7 +3,9 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { webhooksService, type Webhook, type WebhookEvent } from '@/services/api'
+import { webhooksService, webhookLogsService, type Webhook, type WebhookEvent, type WebhookLog } from '@/services/api'
+import WebhookLogDetailSheet from '@/components/webhooks/WebhookLogDetailSheet.vue'
+import { formatLogTime, webhookDeliveryStatusClass } from '@/lib/logs'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
@@ -56,6 +58,38 @@ const { showLeaveDialog, confirmLeave, cancelLeave } = useUnsavedChangesGuard(ha
 
 const canWrite = computed(() => authStore.hasPermission('webhooks', 'write'))
 const canDelete = computed(() => authStore.hasPermission('webhooks', 'delete'))
+const canReadLogs = computed(() => authStore.hasPermission('webhook_logs'))
+
+// Recent deliveries: the latest few from the last week, with a link to the
+// full logs filtered to this webhook.
+const RECENT_DELIVERIES_DAYS = 7
+const RECENT_DELIVERIES_SHOWN = 10
+const recentDeliveries = ref<WebhookLog[]>([])
+const selectedDelivery = ref<WebhookLog | null>(null)
+const deliveryDetailOpen = ref(false)
+
+async function fetchRecentDeliveries() {
+  if (isNew.value || !canReadLogs.value) return
+  try {
+    const now = new Date()
+    const from = new Date(now.getTime() - RECENT_DELIVERIES_DAYS * 24 * 60 * 60 * 1000)
+    const response = await webhookLogsService.list({
+      from: from.toISOString(),
+      to: now.toISOString(),
+      webhook_id: webhookId.value,
+    })
+    const data = (response.data as any).data || response.data
+    recentDeliveries.value = (data.logs || []).slice(0, RECENT_DELIVERIES_SHOWN)
+  } catch {
+    // The section is informational; the page works without it
+    recentDeliveries.value = []
+  }
+}
+
+function openDelivery(log: WebhookLog) {
+  selectedDelivery.value = log
+  deliveryDetailOpen.value = true
+}
 
 const newHeaderKey = ref('')
 const newHeaderValue = ref('')
@@ -193,6 +227,8 @@ async function testWebhook() {
     toast.error(getErrorMessage(e, t('webhooks.testFailed')))
   } finally {
     isTesting.value = false
+    // The test send is logged; show it.
+    fetchRecentDeliveries()
   }
 }
 
@@ -215,6 +251,7 @@ onMounted(async () => {
     hasChanges.value = false
   } else {
     await loadWebhook()
+    fetchRecentDeliveries()
   }
 })
 </script>
@@ -315,6 +352,36 @@ onMounted(async () => {
         </CardContent>
       </Card>
 
+      <Card v-if="webhook && !isNew && canReadLogs">
+        <CardHeader class="pb-3">
+          <div class="flex items-center justify-between">
+            <CardTitle class="text-sm font-medium">{{ $t('webhookLogs.recentDeliveries') }}</CardTitle>
+            <RouterLink :to="`/settings/webhook-logs?webhook_id=${webhook.id}`" class="text-xs text-muted-foreground hover:text-foreground">
+              {{ $t('webhookLogs.viewAll') }}
+            </RouterLink>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p v-if="recentDeliveries.length === 0" class="text-sm text-muted-foreground">
+            {{ $t('webhookLogs.noRecentDeliveries', { days: RECENT_DELIVERIES_DAYS }) }}
+          </p>
+          <ul v-else class="divide-y">
+            <li v-for="log in recentDeliveries" :key="log.id">
+              <button type="button" class="flex w-full items-center justify-between gap-3 py-2 text-left hover:bg-muted/50 rounded px-1" @click="openDelivery(log)">
+                <div class="min-w-0">
+                  <p class="text-xs font-mono">{{ log.event }}</p>
+                  <p class="text-xs text-muted-foreground">{{ formatLogTime(log.created_at) }}</p>
+                  <p v-if="log.status === 'failed' && log.failure_reason" class="text-xs text-red-500 truncate">{{ log.failure_reason }}</p>
+                </div>
+                <Badge variant="outline" :class="[webhookDeliveryStatusClass(log.status), 'text-xs shrink-0']">
+                  {{ $t(`webhookLogs.statuses.${log.status}`) }}
+                </Badge>
+              </button>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
       <AuditLogPanel
         v-if="webhook && !isNew"
         resource-type="webhook"
@@ -345,5 +412,6 @@ onMounted(async () => {
     </AlertDialog>
 
     <UnsavedChangesDialog :open="showLeaveDialog" @stay="cancelLeave" @leave="confirmLeave" />
+    <WebhookLogDetailSheet v-model:open="deliveryDetailOpen" :log="selectedDelivery" />
   </div>
 </template>

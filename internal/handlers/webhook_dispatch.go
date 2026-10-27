@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -37,6 +38,36 @@ type MessageEventData struct {
 	WhatsAppAccount  string             `json:"whatsapp_account"`
 	Direction        models.Direction   `json:"direction,omitempty"`
 	SentByUserID     string             `json:"sent_by_user_id,omitempty"`
+}
+
+// Message failure sources reported in MessageFailedEventData.Source
+const (
+	// MessageFailureSourceSendError means the send request to Meta was rejected
+	// (or never completed), so the message has no WhatsApp message ID.
+	MessageFailureSourceSendError = "send_error"
+	// MessageFailureSourceStatusCallback means Meta accepted the message and
+	// later reported status=failed via the statuses webhook.
+	MessageFailureSourceStatusCallback = "status_callback"
+)
+
+// MessageFailedEventData represents data for the message.failed event
+type MessageFailedEventData struct {
+	MessageID         string             `json:"message_id"`
+	WhatsAppMessageID string             `json:"whatsapp_message_id,omitempty"`
+	ContactID         string             `json:"contact_id"`
+	ContactPhone      string             `json:"contact_phone"`
+	ContactName       string             `json:"contact_name"`
+	MessageType       models.MessageType `json:"message_type"`
+	Content           string             `json:"content"`
+	TemplateName      string             `json:"template_name,omitempty"`
+	WhatsAppAccount   string             `json:"whatsapp_account"`
+	SentByUserID      string             `json:"sent_by_user_id,omitempty"`
+	CampaignID        string             `json:"campaign_id,omitempty"`
+	Source            string             `json:"source"`
+	ErrorCode         int                `json:"error_code,omitempty"` // Meta error code; only set for status_callback failures
+	ErrorTitle        string             `json:"error_title,omitempty"`
+	ErrorMessage      string             `json:"error_message"`
+	ErrorDetails      string             `json:"error_details,omitempty"`
 }
 
 // ContactEventData represents data for contact events
@@ -134,12 +165,16 @@ func (a *App) sendWebhook(ctx context.Context, webhook models.Webhook, eventType
 		return
 	}
 
+	headers := webhookRequestHeaders(webhook, jsonData)
+	deliveryID := a.startWebhookDelivery(webhook, eventType, data, jsonData, headers)
+
 	// Retry logic with exponential backoff
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		// Check if context was cancelled before retry
 		if ctx.Err() != nil {
 			a.Log.Warn("webhook delivery cancelled", "reason", ctx.Err(), "webhook_id", webhook.ID)
+			a.cancelWebhookDelivery(deliveryID, ctx.Err())
 			return
 		}
 
@@ -148,14 +183,17 @@ func (a *App) sendWebhook(ctx context.Context, webhook models.Webhook, eventType
 			select {
 			case <-ctx.Done():
 				a.Log.Warn("webhook delivery cancelled during backoff", "reason", ctx.Err(), "webhook_id", webhook.ID)
+				a.cancelWebhookDelivery(deliveryID, ctx.Err())
 				return
 			case <-time.After(time.Duration(1<<attempt) * time.Second):
 			}
 		}
 
-		if err := a.sendWebhookRequest(ctx, webhook, jsonData); err != nil {
+		result := a.sendWebhookRequest(ctx, webhook, jsonData, headers)
+		a.recordWebhookAttempt(deliveryID, attempt+1, result, result.ok() || attempt == maxRetries-1)
+		if !result.ok() {
 			a.Log.Warn("webhook delivery failed",
-				"error", err,
+				"error", result.Err,
 				"webhook_id", webhook.ID,
 				"attempt", attempt+1,
 				"max_retries", maxRetries,
@@ -179,44 +217,74 @@ func (a *App) sendWebhook(ctx context.Context, webhook models.Webhook, eventType
 	)
 }
 
-func (a *App) sendWebhookRequest(ctx context.Context, webhook models.Webhook, jsonData []byte) error {
-	req, err := http.NewRequestWithContext(ctx, "POST", webhook.URL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
+// webhookRequestHeaders returns the headers sent with a webhook request: the
+// defaults, the webhook's custom headers (which may override the defaults) and
+// the HMAC signature. The same map is recorded in the delivery log, so the log
+// shows exactly what was sent.
+func webhookRequestHeaders(webhook models.Webhook, jsonData []byte) map[string]string {
+	headers := map[string]string{
+		"Content-Type": "application/json",
+		"User-Agent":   "Whatomate-Webhook/1.0",
 	}
 
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Whatomate-Webhook/1.0")
-
 	// Add custom headers from webhook config
-	if webhook.Headers != nil {
-		for key, value := range webhook.Headers {
-			if strValue, ok := value.(string); ok {
-				req.Header.Set(key, strValue)
-			}
+	for key, value := range webhook.Headers {
+		if strValue, ok := value.(string); ok {
+			headers[http.CanonicalHeaderKey(key)] = strValue
 		}
 	}
 
 	// Add HMAC signature if secret is configured
 	if webhook.Secret != "" {
-		signature := computeHMACSignature(jsonData, webhook.Secret)
-		req.Header.Set("X-Webhook-Signature", signature)
+		headers["X-Webhook-Signature"] = computeHMACSignature(jsonData, webhook.Secret)
+	}
+	return headers
+}
+
+// webhookAttemptResult is the outcome of one webhook HTTP request. Err is nil
+// only for a 2xx response.
+type webhookAttemptResult struct {
+	StatusCode   int // 0 if no response was received
+	ResponseBody string
+	Duration     time.Duration
+	Err          error
+}
+
+func (r webhookAttemptResult) ok() bool { return r.Err == nil }
+
+func (a *App) sendWebhookRequest(ctx context.Context, webhook models.Webhook, jsonData []byte, headers map[string]string) webhookAttemptResult {
+	start := time.Now()
+	req, err := http.NewRequestWithContext(ctx, "POST", webhook.URL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return webhookAttemptResult{Err: err, Duration: time.Since(start)}
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 
 	// Send request
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
-		return err
+		return webhookAttemptResult{Err: err, Duration: time.Since(start)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Check for successful status code (2xx)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &WebhookError{StatusCode: resp.StatusCode}
+	// Keep the start of the body for the delivery log, then drain a bounded
+	// amount more so the connection can be reused.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, webhookResponseCaptureBytes))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, webhookResponseDrainBytes))
+
+	result := webhookAttemptResult{
+		StatusCode:   resp.StatusCode,
+		ResponseBody: string(body),
+		Duration:     time.Since(start),
 	}
 
-	return nil
+	// Check for successful status code (2xx)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		result.Err = &WebhookError{StatusCode: resp.StatusCode}
+	}
+	return result
 }
 
 func computeHMACSignature(data []byte, secret string) string {

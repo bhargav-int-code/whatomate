@@ -24,6 +24,13 @@ const (
 	ContextKeyIsSuperAdmin   = "is_super_admin"
 	ContextKeyUser           = "user"
 	ContextKeyOrganization   = "organization"
+	// ContextKeyAPIKeyAuth is true when the request authenticated with an API
+	// key rather than a user's session (unset otherwise).
+	ContextKeyAPIKeyAuth = "api_key_auth"
+	// ContextKeyMCPClient names the AI assistant when the request was made by
+	// a tool of the built-in MCP server. Only set in-process, never from a
+	// request header.
+	ContextKeyMCPClient = "mcp_client"
 )
 
 // JWTClaims represents JWT claims
@@ -194,9 +201,29 @@ func AuthWithDB(secret string, db *gorm.DB) fastglue.FastMiddleware {
 
 // validateAPIKey validates an API key and sets context values
 func validateAPIKey(r *fastglue.Request, key string, db *gorm.DB) bool {
+	apiKey, ok := AuthenticateAPIKey(db, key)
+	if !ok {
+		return false
+	}
+
+	// Set context values from the user who created the key
+	r.RequestCtx.SetUserValue(ContextKeyUserID, apiKey.UserID)
+	r.RequestCtx.SetUserValue(ContextKeyOrganizationID, apiKey.OrganizationID)
+	r.RequestCtx.SetUserValue(ContextKeyEmail, apiKey.User.Email)
+	if apiKey.User.RoleID != nil {
+		r.RequestCtx.SetUserValue(ContextKeyRoleID, *apiKey.User.RoleID)
+	}
+	r.RequestCtx.SetUserValue(ContextKeyIsSuperAdmin, apiKey.User.IsSuperAdmin)
+	r.RequestCtx.SetUserValue(ContextKeyAPIKeyAuth, true)
+	return true
+}
+
+// AuthenticateAPIKey returns the active, unexpired API key matching key, with
+// its User loaded, and records that it was used.
+func AuthenticateAPIKey(db *gorm.DB, key string) (*models.APIKey, bool) {
 	// API key format: whm_<32 hex chars>
 	if len(key) != 36 || key[:4] != "whm_" {
-		return false
+		return nil, false
 	}
 
 	// Extract both new (16-char) and old (8-char) prefixes for backward compatibility.
@@ -207,40 +234,35 @@ func validateAPIKey(r *fastglue.Request, key string, db *gorm.DB) bool {
 	// Find API keys with matching prefix (supports both old and new prefix lengths)
 	var apiKeys []models.APIKey
 	if err := db.Preload("User").Where("(key_prefix = ? OR key_prefix = ?) AND is_active = ?", newPrefix, oldPrefix, true).Find(&apiKeys).Error; err != nil {
-		return false
+		return nil, false
 	}
 
 	// Check each key with bcrypt
-	for _, apiKey := range apiKeys {
-		if err := bcrypt.CompareHashAndPassword([]byte(apiKey.KeyHash), []byte(key)); err == nil {
-			// Key matches - check expiration
-			if apiKey.ExpiresAt != nil && time.Now().After(*apiKey.ExpiresAt) {
-				return false // Key expired
-			}
-
-			// Update last used timestamp (async to not block request)
-			go func(id uuid.UUID) {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				now := time.Now()
-				db.WithContext(ctx).Model(&models.APIKey{}).Where("id = ?", id).Update("last_used_at", now)
-			}(apiKey.ID)
-
-			// Set context values from the user who created the key
-			if apiKey.User != nil {
-				r.RequestCtx.SetUserValue(ContextKeyUserID, apiKey.UserID)
-				r.RequestCtx.SetUserValue(ContextKeyOrganizationID, apiKey.OrganizationID)
-				r.RequestCtx.SetUserValue(ContextKeyEmail, apiKey.User.Email)
-				if apiKey.User.RoleID != nil {
-					r.RequestCtx.SetUserValue(ContextKeyRoleID, *apiKey.User.RoleID)
-				}
-				r.RequestCtx.SetUserValue(ContextKeyIsSuperAdmin, apiKey.User.IsSuperAdmin)
-				return true
-			}
+	for i := range apiKeys {
+		apiKey := &apiKeys[i]
+		if err := bcrypt.CompareHashAndPassword([]byte(apiKey.KeyHash), []byte(key)); err != nil {
+			continue
 		}
+		// Key matches - check expiration
+		if apiKey.ExpiresAt != nil && time.Now().After(*apiKey.ExpiresAt) {
+			return nil, false // Key expired
+		}
+		if apiKey.User == nil {
+			return nil, false
+		}
+
+		// Update last used timestamp (async to not block request)
+		go func(id uuid.UUID) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			now := time.Now()
+			db.WithContext(ctx).Model(&models.APIKey{}).Where("id = ?", id).Update("last_used_at", now)
+		}(apiKey.ID)
+
+		return apiKey, true
 	}
 
-	return false
+	return nil, false
 }
 
 // OrganizationContext loads organization and user from database
@@ -355,4 +377,17 @@ func GetOrganization(r *fastglue.Request) (*models.Organization, bool) {
 func IsSuperAdmin(r *fastglue.Request) bool {
 	isSuperAdmin, ok := r.RequestCtx.UserValue(ContextKeyIsSuperAdmin).(bool)
 	return ok && isSuperAdmin
+}
+
+// MCPClient returns the AI assistant's name when the request came from the
+// built-in MCP server.
+func MCPClient(r *fastglue.Request) (string, bool) {
+	client, ok := r.RequestCtx.UserValue(ContextKeyMCPClient).(string)
+	return client, ok && client != ""
+}
+
+// IsAPIKeyAuth reports whether the request authenticated with an API key
+func IsAPIKeyAuth(r *fastglue.Request) bool {
+	viaKey, ok := r.RequestCtx.UserValue(ContextKeyAPIKeyAuth).(bool)
+	return ok && viaKey
 }

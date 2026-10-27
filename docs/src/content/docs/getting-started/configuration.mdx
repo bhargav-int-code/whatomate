@@ -25,6 +25,7 @@ read_timeout = 30
 write_timeout = 30
 base_path = ""                # Set to "/subpath" if behind nginx proxy_pass at a sub-path
 allowed_origins = ""          # Comma-separated CORS origins. Empty = allow all (dev only).
+public_url = ""               # Public URL, e.g. "https://wa.example.com". Used by the MCP server's OAuth.
 
 [database]
 host = "localhost"            # Use "db" inside Docker compose
@@ -144,6 +145,7 @@ full_name = "Admin"
 | `read_timeout`, `write_timeout` | Seconds. |
 | `base_path` | Leave empty unless serving at a sub-path (`https://app.example.com/whatomate`) behind a proxy. |
 | `allowed_origins` | Comma-separated list, e.g. `"https://app.example.com,https://admin.example.com"`. **Empty allows all origins** — only safe in development. |
+| `public_url` | The URL people open Whatomate at, including any `base_path`, with no trailing slash. The [MCP server](/whatomate/features/mcp) uses it to name itself to AI assistants, and its OAuth tokens are bound to it. When empty it is derived from each request's `Host` and `X-Forwarded-*` headers. Set it in production. |
 
 ### `[database]`
 

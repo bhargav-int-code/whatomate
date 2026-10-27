@@ -58,6 +58,22 @@ const (
 	MessageStatusReceived  MessageStatus = "received"
 )
 
+// MessageSource records how a message entered the system. Rows created before
+// the column existed have an empty source.
+type MessageSource string
+
+const (
+	MessageSourceAPI        MessageSource = "api"        // sent with an API key
+	MessageSourceMCP        MessageSource = "mcp"        // sent by an AI assistant through the MCP server
+	MessageSourceAgent      MessageSource = "agent"      // sent by a logged-in user from the UI
+	MessageSourceChatbot    MessageSource = "chatbot"    // keyword, flow, AI, greeting and fallback replies
+	MessageSourceCampaign   MessageSource = "campaign"   // bulk campaign worker
+	MessageSourceAutomation MessageSource = "automation" // SLA notices, inactivity reminders, auto-close
+	MessageSourcePhoneApp   MessageSource = "phone_app"  // echoed from the WhatsApp Business phone app
+	MessageSourceIncoming   MessageSource = "incoming"   // received from a contact
+	MessageSourceCall       MessageSource = "call"       // locally generated voice call entry
+)
+
 // AIProvider represents supported AI providers
 type AIProvider string
 
@@ -213,6 +229,7 @@ const (
 	WebhookEventMessageIncoming  WebhookEvent = "message.incoming"
 	WebhookEventMessageOutgoing  WebhookEvent = "message.outgoing"
 	WebhookEventMessageSent      WebhookEvent = "message.sent"
+	WebhookEventMessageFailed    WebhookEvent = "message.failed"
 	WebhookEventContactCreated   WebhookEvent = "contact.created"
 	WebhookEventTransferCreated  WebhookEvent = "transfer.created"
 	WebhookEventTransferResumed  WebhookEvent = "transfer.resumed"

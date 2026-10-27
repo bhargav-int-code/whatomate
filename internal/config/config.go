@@ -112,6 +112,10 @@ type ServerConfig struct {
 	WriteTimeout   int    `koanf:"write_timeout"`
 	BasePath       string `koanf:"base_path"`       // Base path for frontend (e.g., "/whatomate" for proxy pass)
 	AllowedOrigins string `koanf:"allowed_origins"` // Comma-separated list of allowed CORS origins
+	// PublicURL is the externally reachable origin (e.g. "https://wa.example.com"),
+	// used where the server must name itself, like the MCP endpoint's OAuth
+	// metadata. When empty it is derived from each request's Host header.
+	PublicURL string `koanf:"public_url"`
 }
 
 type DatabaseConfig struct {

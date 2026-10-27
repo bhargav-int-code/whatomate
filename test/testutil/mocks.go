@@ -257,8 +257,9 @@ func (m *MockWhatsAppClient) GetMessagesSentTo(phone string) []MockSentMessage {
 
 // MockQueue is a mock implementation of queue.Queue.
 type MockQueue struct {
-	mu   sync.Mutex
-	Jobs []*queue.RecipientJob
+	mu         sync.Mutex
+	Jobs       []*queue.RecipientJob
+	ExportJobs []*queue.ExportJob
 
 	// Configurable behavior
 	EnqueueFunc  func(ctx context.Context, job *queue.RecipientJob) error
@@ -306,6 +307,19 @@ func (m *MockQueue) EnqueueRecipients(ctx context.Context, jobs []*queue.Recipie
 	if m.EnqueuesFunc != nil {
 		return m.EnqueuesFunc(ctx, jobs)
 	}
+	return nil
+}
+
+// EnqueueExport mocks enqueueing an export job.
+func (m *MockQueue) EnqueueExport(ctx context.Context, job *queue.ExportJob) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.Error != nil {
+		return m.Error
+	}
+
+	m.ExportJobs = append(m.ExportJobs, job)
 	return nil
 }
 

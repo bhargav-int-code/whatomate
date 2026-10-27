@@ -1,0 +1,114 @@
+---
+title: AI Assistants (MCP)
+description: Connect Claude, ChatGPT and other AI assistants to send messages, run campaigns and read delivery logs
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Whatomate includes a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server, so AI assistants such as Claude and ChatGPT can work with your WhatsApp account. You can ask them things like:
+
+- "Which messages failed yesterday, and why?"
+- "Send the `order_shipped` template to 919876543210 with order number 4521."
+- "Create a campaign with the `diwali_offer` template for these 40 numbers and show me before sending."
+- "Did our CRM webhook fail for any message this week?"
+
+Each person connects an assistant to **their own** Whatomate account. The assistant can only do what that person's role allows, limited further to the permissions they approve when connecting.
+
+## Turn it on
+
+AI assistant access is off by default. An admin with permission to change general settings turns it on under **Settings → AI Assistants → Allow AI assistants**.
+
+Turning it off blocks every connected assistant immediately. Their connections stay listed and work again if access is turned back on; disconnect them to remove them for good.
+
+<Aside type="caution">
+  Claude.ai and ChatGPT connect from the internet. Your Whatomate must be reachable over **HTTPS** at a public address, and [`server.public_url`](/whatomate/getting-started/configuration) should be set to that address. For local testing, a tunnel such as ngrok works.
+</Aside>
+
+## Connect an assistant
+
+**Settings → AI Assistants** shows your server URL, which is your Whatomate address followed by `/mcp`, e.g. `https://wa.example.com/mcp`.
+
+| Assistant | How to connect |
+|---|---|
+| Claude (claude.ai, desktop and mobile) | **Settings → Connectors → Add custom connector**, paste the server URL. On Team and Enterprise plans an owner adds it for the organization first. |
+| ChatGPT | **Settings → Apps & Connectors → Advanced**, turn on **Developer mode**, then create a connector with the server URL and OAuth authentication. Needs a plan that allows custom connectors. |
+| Claude Code | `claude mcp add --transport http whatomate https://wa.example.com/mcp`, then run `/mcp` in Claude Code to sign in. |
+
+The assistant opens a Whatomate page in your browser. Log in if asked, then review the request:
+
+- **Organization**: if you belong to several, choose which one the assistant works in. Organizations where AI access is off are marked and can't be chosen.
+- **Permissions**: untick anything you don't want the assistant to do.
+
+Click **Allow** and you return to the assistant, which is now connected.
+
+### Permissions
+
+| Permission | Lets the assistant |
+|---|---|
+| Read messages (`messages:read`) | Look up contacts, read conversations, list templates, search message logs and see stats. |
+| Send messages (`messages:send`) | Send text and template messages, create contacts and change their tags. |
+| View campaigns (`campaigns:read`) | List campaigns, their recipients and results. |
+| Run campaigns (`campaigns:write`) | Create campaigns, add recipients, and start, pause or cancel them. |
+| Read webhook logs (`webhooks:read`) | Search deliveries of your outbound webhooks. |
+
+Your role still applies on top: if your role can't start campaigns (`campaigns:execute`), an assistant connected with **Run campaigns** can create and fill them but not start them.
+
+### Connecting with an API key
+
+Tools and scripts that can't do OAuth can use an [API key](/whatomate/api-reference/api-keys) as a bearer token: `Authorization: Bearer whm_…` (or the `X-API-Key` header). An API key acts as the user who created it, with every permission. For people using an assistant, prefer OAuth: it's per person, limited to what they approve, and can be revoked without rotating a key.
+
+## What assistants can do
+
+The server offers 24 tools, all named `whatomate_…`:
+
+| Area | Tools |
+|---|---|
+| Account | Who you are connected as, your organization, role and permissions; list WhatsApp accounts |
+| Contacts | Search, view and create contacts; replace a contact's tags |
+| Conversations | Read a conversation, oldest to newest, with paging |
+| Templates | List templates and view one with its variables |
+| Sending | Send a text message; send an approved template |
+| Message logs | Search the delivery log; view one message's full record; organization totals |
+| Campaigns | List and view campaigns and recipients; create, add recipients, start, pause, cancel |
+| Webhook logs | Search deliveries of your outbound webhooks; view one in full |
+
+Built-in safeguards:
+
+- **24-hour window.** WhatsApp only allows free-form messages within 24 hours of the customer's last message. Outside it the send tool refuses and tells the assistant to use an approved template instead.
+- **Campaign preview.** Starting a campaign first returns a preview: the template, the account and how many people will be messaged. Nothing is sent until the assistant calls again with `confirm`, which it should only do after you agree.
+- **Reading is silent.** Reading a conversation does not mark messages as read or send read receipts to the customer.
+- **Media headers.** Templates with image, video or document headers can't be sent by an assistant; use a campaign or the inbox.
+
+## Tracking what assistants did
+
+- Messages sent by an assistant show **AI Assistant** as their source in [Message Logs](/whatomate/features/message-logs).
+- Contact, message and campaign changes made by an assistant are recorded in the [audit log](/whatomate/features/audit-logs) with the tool used and the connection (for example `Claude`).
+- Connecting and disconnecting an assistant are audited too.
+
+## Managing connections
+
+- **Your own:** **Profile → Connected AI assistants** lists the assistants you connected, with their permissions and when they were last used. **Disconnect** stops one immediately.
+- **Everyone's:** admins see every connection in the organization under **Settings → AI Assistants → Connected assistants**, and can disconnect any of them.
+
+A connection also stops working when its user is deactivated or removed from the organization. Connections not used for 30 days expire.
+
+## Security
+
+- OAuth 2.1 with PKCE. Assistants never see a password or API key.
+- Access tokens last an hour; refresh tokens last 30 days and are replaced every time they're used. If an old refresh token or an authorization code is used twice, the connection is revoked, since that means it leaked.
+- Tokens are stored only as hashes, and only work for this server's `/mcp` address.
+- Apps that register themselves are only kept if someone approves them within a day.
+
+## Troubleshooting
+
+| Problem | Cause |
+|---|---|
+| The assistant says it can't reach the server | Whatomate isn't reachable from the internet over HTTPS, or the URL is wrong. Open `https://your-address/.well-known/oauth-protected-resource/mcp` in a browser; it should return JSON. |
+| "AI assistant (MCP) access is turned off" | An admin needs to turn on **Allow AI assistants**. |
+| The assistant keeps asking you to sign in again | `server.public_url` changed, or the server is reached under a different address than it was connected with. Tokens are bound to the address. Reconnect. |
+| "This request has expired" on the approval page | Approval requests last 10 minutes and work once. Start connecting again from the assistant. |
+| A tool says "permission denied" | Your role doesn't allow that action. An admin can change it under **Settings → Roles**. |
+
+<Aside type="note">
+  If Whatomate is served under a sub-path (`base_path`), include it in `public_url`, e.g. `https://example.com/whatomate`. Assistants look up OAuth details at the root of the domain (for example `https://example.com/.well-known/oauth-authorization-server/whatomate`), so your proxy must also forward requests for `/.well-known/` at the domain root to Whatomate.
+</Aside>

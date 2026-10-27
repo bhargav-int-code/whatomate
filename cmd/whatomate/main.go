@@ -17,7 +17,9 @@ import (
 	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/frontend"
 	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/internal/mcpserver"
 	"github.com/shridarpatil/whatomate/internal/middleware"
+	"github.com/shridarpatil/whatomate/internal/oauth"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -209,6 +211,12 @@ func runServer(args []string) {
 		HTTPClient: httpClient,
 	}
 
+	// Migrations can grant new permissions to existing roles; drop cached
+	// permission sets so users see them now rather than after the cache TTL.
+	if *migrate {
+		app.InvalidateAllPermissionsCaches()
+	}
+
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
@@ -282,6 +290,16 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Close out webhook deliveries left "processing" by a restart, delete
+	// expired export files and relay workers' export updates to users
+	sweepCtx, sweepCancel := context.WithCancel(context.Background())
+	go app.StartWebhookDeliverySweeper(sweepCtx)
+	go app.StartExportSweeper(sweepCtx)
+	go oauth.NewStore(db, rdb, httpClient).StartSweeper(sweepCtx, lo.Error)
+	if err := app.StartExportUpdatesSubscriber(sweepCtx); err != nil {
+		lo.Error("Failed to start export updates subscriber", "error", err)
+	}
+
 	// Start embedded workers
 	var workers []*worker.Worker
 	var workerCancel context.CancelFunc
@@ -326,6 +344,7 @@ func runServer(args []string) {
 	slaCancel()
 	slaProcessor.Stop()
 	lo.Info("SLA processor stopped")
+	sweepCancel()
 
 	// Stop workers first
 	if workerCancel != nil {
@@ -584,6 +603,17 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/me/password", app.ChangePassword)
 	g.PUT("/api/me/availability", app.UpdateAvailability)
 	g.GET("/api/me/organizations", app.ListMyOrganizations)
+	g.GET("/api/me/connected-apps", app.ListMyConnectedApps)
+	g.DELETE("/api/me/connected-apps/{id}", app.RevokeMyConnectedApp)
+
+	// OAuth consent for AI assistants (the consent page calls these)
+	g.GET("/api/oauth/requests/{id}", app.GetOAuthRequest)
+	g.POST("/api/oauth/requests/{id}/approve", app.ApproveOAuthRequest)
+	g.POST("/api/oauth/requests/{id}/deny", app.DenyOAuthRequest)
+
+	// AI assistant connections across the organization (admins)
+	g.GET("/api/mcp/connections", app.ListMCPConnections)
+	g.DELETE("/api/mcp/connections/{id}", app.RevokeMCPConnection)
 
 	// User Management (admin only - enforced by middleware)
 	g.GET("/api/users", app.ListUsers)
@@ -658,6 +688,16 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/contacts/{id}/notes", app.CreateConversationNote)
 	g.PUT("/api/contacts/{id}/notes/{note_id}", app.UpdateConversationNote)
 	g.DELETE("/api/contacts/{id}/notes/{note_id}", app.DeleteConversationNote)
+
+	// Message Logs
+	g.GET("/api/message-logs", app.ListMessageLogs)
+	g.POST("/api/message-logs/exports", app.RequestMessageLogExport)
+	g.GET("/api/message-logs/{id}", app.GetMessageLog)
+
+	// Exports (the requesting user's background exports)
+	g.GET("/api/exports", app.ListExports)
+	g.GET("/api/exports/{id}/download", app.DownloadExport)
+	g.DELETE("/api/exports/{id}", app.DeleteExport)
 
 	// Media (serves media files for messages, auth-protected)
 	g.GET("/api/media/{message_id}", app.ServeMedia)
@@ -810,6 +850,11 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/webhooks/{id}", app.DeleteWebhook)
 	g.POST("/api/webhooks/{id}/test", app.TestWebhook)
 
+	// Webhook Logs
+	g.GET("/api/webhook-logs", app.ListWebhookLogs)
+	g.POST("/api/webhook-logs/purge", app.PurgeWebhookLogs)
+	g.GET("/api/webhook-logs/{id}", app.GetWebhookLog)
+
 	// Custom Actions
 	g.GET("/api/custom-actions", app.ListCustomActions)
 	g.POST("/api/custom-actions", app.CreateCustomAction)
@@ -866,6 +911,47 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/products/{id}", app.DeleteCatalogProduct)
 
 	// Serve embedded frontend (SPA)
+	// MCP server for AI assistants. Outside /api, so it authenticates its own
+	// bearer tokens; its tools call the routes above in-process.
+	mcpSrv := mcpserver.New(app, g.Handler())
+	serveMCP := func(r *fastglue.Request) error {
+		mcpSrv.Handler(r.RequestCtx)
+		return nil
+	}
+	g.POST(mcpserver.Path, serveMCP)
+	g.GET(mcpserver.Path, serveMCP)
+	g.DELETE(mcpserver.Path, serveMCP)
+	serveMCPMetadata := func(r *fastglue.Request) error {
+		mcpSrv.ResourceMetadataHandler(r.RequestCtx)
+		return nil
+	}
+	g.GET(mcpserver.ResourceMetadataPath, serveMCPMetadata)
+	g.GET("/.well-known/oauth-protected-resource", serveMCPMetadata)
+
+	// OAuth authorization server for AI assistants. Public endpoints: clients
+	// authenticate with PKCE, and users approve on the consent page.
+	fast := func(h fasthttp.RequestHandler) fastglue.FastRequestHandler {
+		return func(r *fastglue.Request) error {
+			h(r.RequestCtx)
+			return nil
+		}
+	}
+	register := fast(mcpSrv.RegisterHandler)
+	if cfg.RateLimit.Enabled {
+		// Per IP: AI providers connect from shared addresses, so this is
+		// generous, but it stops anyone filling the clients table.
+		register = withRateLimit(register, middleware.RateLimitOpts{
+			Redis: rdb, Log: lo, Max: 30, Window: time.Hour, KeyPrefix: "oauth_register", TrustProxy: cfg.RateLimit.TrustProxy,
+		})
+	}
+	g.GET(mcpserver.AuthorizationServerMetadataPath, fast(mcpSrv.AuthorizationServerMetadataHandler))
+	// RFC 8414 path form, used when public_url has a path (a base_path)
+	g.GET(mcpserver.AuthorizationServerMetadataPath+"/{path:*}", fast(mcpSrv.AuthorizationServerMetadataHandler))
+	g.POST(mcpserver.RegisterPath, register)
+	g.GET(mcpserver.AuthorizePath, fast(mcpSrv.AuthorizeHandler))
+	g.POST(mcpserver.TokenPath, fast(mcpSrv.TokenHandler))
+	g.POST(mcpserver.RevokePath, fast(mcpSrv.RevokeHandler))
+
 	if frontend.IsEmbedded() {
 		lo.Info("Serving embedded frontend", "base_path", basePath)
 		frontendHandler := frontend.Handler(basePath)

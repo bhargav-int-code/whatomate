@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
@@ -378,7 +379,17 @@ func (a *App) processStatusUpdate(phoneNumberID string, status WebhookStatus) {
 	a.Log.Info("Processing status update", "message_id", messageID, "status", statusValue, "phone_number_id", phoneNumberID)
 
 	// Update messages table - this also handles campaign stats via incrementCampaignStat
-	a.updateMessageStatus(messageID, statusValue, status.Errors)
+	a.updateMessageStatus(status)
+}
+
+// statusEventTime returns when Meta says a status event happened, from the
+// callback's unix-seconds timestamp, falling back to now if it's missing or
+// malformed.
+func statusEventTime(timestamp string) time.Time {
+	if secs, err := strconv.ParseInt(timestamp, 10, 64); err == nil && secs > 0 {
+		return time.Unix(secs, 0)
+	}
+	return time.Now()
 }
 
 // statusPriority returns the priority of a status (higher = more progressed)
@@ -399,8 +410,12 @@ func statusPriority(status models.MessageStatus) int {
 	}
 }
 
-// updateMessageStatus updates the status of a regular message in the messages table
-func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []WebhookStatusError) {
+// updateMessageStatus applies a Meta status callback to the matching message
+// in the messages table. status.RecipientID is Meta's recipient_id; it may be
+// empty for username-only (BSUID) recipients.
+func (a *App) updateMessageStatus(status WebhookStatus) {
+	whatsappMsgID, statusValue, errors := status.ID, status.Status, status.Errors
+
 	// Find the message by WhatsApp message ID
 	var message models.Message
 	result := a.DB.Where("whats_app_message_id = ?", whatsappMsgID).First(&message)
@@ -410,30 +425,46 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 	}
 
 	newStatus := models.MessageStatus(statusValue)
+	// Meta can redeliver a failed status; only the first transition into
+	// failed should fire the message.failed webhook.
+	wasFailed := message.Status == models.MessageStatusFailed
 	currentPriority := statusPriority(message.Status)
 	newPriority := statusPriority(newStatus)
 
-	// Only update if new status is a progression (higher priority) or if it's failed
-	if newPriority <= currentPriority && newStatus != models.MessageStatusFailed {
-		a.Log.Debug("Ignoring status update - not a progression",
-			"message_id", message.ID,
-			"current_status", message.Status,
-			"new_status", statusValue)
+	if newPriority < 0 || newStatus == models.MessageStatusPending {
+		a.Log.Debug("Ignoring message status update", "status", statusValue)
 		return
 	}
 
 	updates := map[string]any{}
 
+	// Delivery timestamps and pricing are recorded even when the status itself
+	// doesn't progress: Meta can send "delivered" after "read", and the logs
+	// should still show when the message was delivered. delivered_at and
+	// read_at are set once; Meta's "sent" time replaces our acceptance time.
+	eventTime := statusEventTime(status.Timestamp)
 	switch newStatus {
 	case models.MessageStatusSent:
-		updates["status"] = models.MessageStatusSent
+		updates["sent_at"] = eventTime
 	case models.MessageStatusDelivered:
-		updates["status"] = models.MessageStatusDelivered
+		if message.DeliveredAt == nil {
+			updates["delivered_at"] = eventTime
+		}
 	case models.MessageStatusRead:
-		updates["status"] = models.MessageStatusRead
-	case models.MessageStatusFailed:
-		updates["status"] = models.MessageStatusFailed
-		if len(errors) > 0 {
+		if message.ReadAt == nil {
+			updates["read_at"] = eventTime
+		}
+	}
+	if status.Pricing != nil && status.Pricing.Category != "" && message.PricingCategory == "" {
+		updates["pricing_category"] = status.Pricing.Category
+	}
+
+	// The status itself only moves forward, except failed, which can
+	// override any status.
+	progressed := newPriority > currentPriority || newStatus == models.MessageStatusFailed
+	if progressed {
+		updates["status"] = newStatus
+		if newStatus == models.MessageStatusFailed && len(errors) > 0 {
 			// Prefer error_data.details (most descriptive), then Message, then Title.
 			errText := errors[0].ErrorData.Details
 			if errText == "" {
@@ -445,8 +476,13 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 
 			updates["error_message"] = errText
 		}
-	default:
-		a.Log.Debug("Ignoring message status update", "status", statusValue)
+	}
+
+	if len(updates) == 0 {
+		a.Log.Debug("Ignoring status update - not a progression",
+			"message_id", message.ID,
+			"current_status", message.Status,
+			"new_status", statusValue)
 		return
 	}
 
@@ -455,7 +491,35 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 		return
 	}
 
+	if !progressed {
+		// Only a late timestamp or pricing was recorded; the visible status,
+		// campaign stats and webhooks are unchanged.
+		return
+	}
+
 	a.Log.Info("Updated message status", "message_id", message.ID, "status", statusValue)
+
+	if newStatus == models.MessageStatusFailed && !wasFailed {
+		// Meta's recipient_id is the number it actually tried to deliver to, so
+		// it wins over the contact row, which may have been edited or deleted.
+		failed := MessageFailedEventData{
+			Source:       MessageFailureSourceStatusCallback,
+			ContactPhone: status.RecipientID,
+		}
+		failed.ErrorMessage, _ = updates["error_message"].(string)
+		if len(errors) > 0 {
+			failed.ErrorCode = errors[0].Code
+			failed.ErrorTitle = errors[0].Title
+			failed.ErrorDetails = errors[0].ErrorData.Details
+		}
+		var contact models.Contact
+		if err := a.DB.Where("id = ? AND organization_id = ?", message.ContactID, message.OrganizationID).First(&contact).Error; err != nil {
+			a.Log.Warn("Contact not found for failed message webhook", "error", err, "message_id", message.ID)
+			a.dispatchMessageFailedWebhook(&message, nil, failed)
+		} else {
+			a.dispatchMessageFailedWebhook(&message, &contact, failed)
+		}
+	}
 
 	// Update campaign stats and recipient status if this is a campaign message
 	if message.Metadata != nil {
@@ -674,6 +738,8 @@ func (a *App) processMessageEcho(phoneNumberID string, msg IncomingTextMessage) 
 		MessageType:       models.MessageType(messageType),
 		Content:           messageText,
 		Status:            models.MessageStatusSent,
+		Source:            models.MessageSourcePhoneApp,
+		SentAt:            &now,
 	}
 
 	// Reply context
