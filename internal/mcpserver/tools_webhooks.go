@@ -3,11 +3,13 @@ package mcpserver
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/internal/models"
 )
 
 func init() {
@@ -23,6 +25,38 @@ func init() {
 		Description: "Get one webhook delivery in full: the request sent (URL, headers, body), the receiver's response and every attempt.",
 		Annotations: readOnly("Get webhook log"),
 	}, getWebhookLog)
+
+	defineTool(ScopeWebhooksRead, "webhooks:read", &mcp.Tool{
+		Name:        "whatomate_list_webhooks",
+		Description: "List the organization's outbound webhooks (where Whatomate sends events) and every event they can subscribe to.",
+		Annotations: readOnly("List webhooks"),
+	}, listWebhooks)
+
+	defineTool(ScopeWebhooksRead, "webhooks:read", &mcp.Tool{
+		Name:        "whatomate_get_webhook",
+		Description: "Get one outbound webhook: URL, events, header names and whether it is active. Secrets are never shown.",
+		Annotations: readOnly("Get webhook"),
+	}, getWebhook)
+
+	defineTool(ScopeWebhooksWrite, "webhooks:write", &mcp.Tool{
+		Name: "whatomate_create_webhook",
+		Description: "Create an outbound webhook that sends the chosen events (e.g. message.incoming, message.failed) to a URL. " +
+			"Always returns a preview first; it is created only when called again with confirm=true after the user approves the URL and events.",
+		Annotations: &mcp.ToolAnnotations{Title: "Create webhook", DestructiveHint: falsePtr, OpenWorldHint: truePtr},
+	}, createWebhook)
+
+	defineTool(ScopeWebhooksWrite, "webhooks:write", &mcp.Tool{
+		Name: "whatomate_update_webhook",
+		Description: "Change an outbound webhook. Only the fields you pass change; deactivate one with active=false instead of deleting it. " +
+			"Always returns a preview first; it is saved only when called again with confirm=true after the user approves.",
+		Annotations: &mcp.ToolAnnotations{Title: "Update webhook", DestructiveHint: falsePtr, IdempotentHint: true, OpenWorldHint: truePtr},
+	}, updateWebhook)
+
+	defineTool(ScopeWebhooksWrite, "webhooks:write", &mcp.Tool{
+		Name:        "whatomate_test_webhook",
+		Description: "Send a test event to a webhook and report whether the receiver accepted it.",
+		Annotations: &mcp.ToolAnnotations{Title: "Test webhook", DestructiveHint: falsePtr, IdempotentHint: true, OpenWorldHint: truePtr},
+	}, testWebhook)
 }
 
 type searchWebhookLogsInput struct {
@@ -140,4 +174,195 @@ func getWebhookLog(c *call, in webhookLogIDInput) (string, any, error) {
 		fmt.Fprintf(&b, "Response: HTTP %d\n%s\n", l.Response.StatusCode, truncate(l.Response.Body, 2000))
 	}
 	return b.String(), out, nil
+}
+
+// Webhook configuration
+
+// webhookView is a webhook as assistants see it: header values may be
+// credentials, so only their names are shown.
+type webhookView struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	URL         string   `json:"url"`
+	Events      []string `json:"events"`
+	HeaderNames []string `json:"header_names"`
+	Active      bool     `json:"active"`
+	HasSecret   bool     `json:"has_secret"`
+}
+
+func toWebhookView(w handlers.WebhookResponse) webhookView {
+	names := make([]string, 0, len(w.Headers))
+	for k := range w.Headers {
+		names = append(names, k)
+	}
+	slices.Sort(names)
+	return webhookView{ID: w.ID.String(), Name: w.Name, URL: w.URL, Events: w.Events, HeaderNames: names, Active: w.IsActive, HasSecret: w.HasSecret}
+}
+
+func webhookEventNames() []string {
+	names := make([]string, len(handlers.AvailableWebhookEvents))
+	for i, e := range handlers.AvailableWebhookEvents {
+		names[i] = e["value"]
+	}
+	return names
+}
+
+func checkWebhookEvents(events []string) error {
+	known := webhookEventNames()
+	for _, e := range events {
+		if !slices.Contains(known, e) {
+			return fmt.Errorf("unknown event %q; events are %s", e, strings.Join(known, ", "))
+		}
+	}
+	return nil
+}
+
+func listWebhooks(c *call, _ noInput) (string, any, error) {
+	var resp struct {
+		Webhooks []handlers.WebhookResponse `json:"webhooks"`
+	}
+	q := url.Values{"limit": {"100"}}
+	if err := c.get("/api/webhooks", q, &resp); err != nil {
+		return "", nil, err
+	}
+	views := make([]webhookView, len(resp.Webhooks))
+	rows := make([][]string, len(resp.Webhooks))
+	for i, w := range resp.Webhooks {
+		views[i] = toWebhookView(w)
+		rows[i] = []string{w.Name, w.URL, strings.Join(w.Events, ", "), yesNo(w.IsActive), views[i].ID}
+	}
+	var b strings.Builder
+	if len(views) == 0 {
+		b.WriteString("No webhooks yet.\n")
+	} else {
+		b.WriteString(table([]string{"Name", "URL", "Events", "Active", "ID"}, rows))
+	}
+	b.WriteString("\nAvailable events:\n")
+	for _, e := range handlers.AvailableWebhookEvents {
+		fmt.Fprintf(&b, "- %s: %s\n", e["value"], e["description"])
+	}
+	return b.String(), map[string]any{"webhooks": views, "available_events": webhookEventNames()}, nil
+}
+
+func (c *call) webhook(id string) (handlers.WebhookResponse, error) {
+	var w handlers.WebhookResponse
+	err := c.get("/api/webhooks/"+pathID(id), nil, &w)
+	return w, err
+}
+
+func getWebhook(c *call, in idInput) (string, any, error) {
+	w, err := c.webhook(in.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	v := toWebhookView(w)
+	return fmt.Sprintf("**%s**\n\n- URL: %s\n- Events: %s\n- Headers: %s\n- Signing secret: %s\n- Active: %s\n",
+		v.Name, v.URL, strings.Join(v.Events, ", "), cell(strings.Join(v.HeaderNames, ", ")), yesNo(v.HasSecret), yesNo(v.Active)), v, nil
+}
+
+type createWebhookInput struct {
+	Name    string            `json:"name" jsonschema:"Webhook name"`
+	URL     string            `json:"url" jsonschema:"HTTPS URL that receives the events"`
+	Events  []string          `json:"events" jsonschema:"Events to send; whatomate_list_webhooks lists them"`
+	Headers map[string]string `json:"headers,omitempty" jsonschema:"Extra request headers, e.g. an auth token for the receiver"`
+	Secret  string            `json:"secret,omitempty" jsonschema:"Optional signing secret; requests then carry an X-Webhook-Signature HMAC"`
+	Confirm bool              `json:"confirm,omitempty" jsonschema:"Set true only after the user approved the preview"`
+}
+
+func createWebhook(c *call, in createWebhookInput) (string, any, error) {
+	if strings.TrimSpace(in.Name) == "" || in.URL == "" || len(in.Events) == 0 {
+		return "", nil, fmt.Errorf("name, url and events are required")
+	}
+	if err := checkWebhookEvents(in.Events); err != nil {
+		return "", nil, err
+	}
+	if !in.Confirm {
+		details := []string{"URL: " + in.URL, "Events: " + strings.Join(in.Events, ", ")}
+		if len(in.Headers) > 0 {
+			details = append(details, "Headers: "+strings.Join(mapKeys(in.Headers), ", "))
+		}
+		text, data := confirmPreview(fmt.Sprintf("Creating webhook %q sends these events, including message contents and phone numbers, to:", in.Name), details)
+		return text, data, nil
+	}
+	body := handlers.WebhookRequest{Name: in.Name, URL: in.URL, Events: in.Events, Headers: in.Headers, Secret: in.Secret, IsActive: true}
+	var w handlers.WebhookResponse
+	if err := c.post("/api/webhooks", body, &w); err != nil {
+		return "", nil, err
+	}
+	c.audit(auditWebhooks, w.ID.String(), models.AuditActionCreated, "create_webhook", map[string]any{"url": w.URL, "events": strings.Join(w.Events, ", ")})
+	return fmt.Sprintf("Created webhook %q (ID %s). Send a test with whatomate_test_webhook.", w.Name, w.ID), toWebhookView(w), nil
+}
+
+type updateWebhookInput struct {
+	ID      string            `json:"id" jsonschema:"Webhook ID (UUID)"`
+	Name    string            `json:"name,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Events  []string          `json:"events,omitempty" jsonschema:"Replaces the events"`
+	Headers map[string]string `json:"headers,omitempty" jsonschema:"Replaces all extra headers"`
+	Secret  string            `json:"secret,omitempty" jsonschema:"New signing secret"`
+	Active  *bool             `json:"active,omitempty" jsonschema:"false pauses deliveries"`
+	Confirm bool              `json:"confirm,omitempty" jsonschema:"Set true only after the user approved the preview"`
+}
+
+func updateWebhook(c *call, in updateWebhookInput) (string, any, error) {
+	if err := checkWebhookEvents(in.Events); err != nil {
+		return "", nil, err
+	}
+	current, err := c.webhook(in.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	var changes []string
+	if in.Name != "" && in.Name != current.Name {
+		changes = append(changes, fmt.Sprintf("Name: %s → %s", current.Name, in.Name))
+	}
+	if in.URL != "" && in.URL != current.URL {
+		changes = append(changes, fmt.Sprintf("URL: %s → %s", current.URL, in.URL))
+	}
+	if in.Events != nil {
+		changes = append(changes, fmt.Sprintf("Events: %s → %s", strings.Join(current.Events, ", "), strings.Join(in.Events, ", ")))
+	}
+	if in.Headers != nil {
+		changes = append(changes, "Headers: "+cell(strings.Join(mapKeys(in.Headers), ", ")))
+	}
+	if in.Secret != "" {
+		changes = append(changes, "Signing secret: replaced")
+	}
+	active := current.IsActive
+	if in.Active != nil && *in.Active != current.IsActive {
+		active = *in.Active
+		changes = append(changes, fmt.Sprintf("Active: %s → %s", yesNo(current.IsActive), yesNo(active)))
+	}
+	if len(changes) == 0 {
+		return "", nil, fmt.Errorf("nothing to change")
+	}
+	if !in.Confirm {
+		text, data := confirmPreview(fmt.Sprintf("Updating webhook %q (%s):", current.Name, current.URL), changes)
+		return text, data, nil
+	}
+	// The REST endpoint always applies is_active, so send the current value
+	// unless it is being changed
+	body := handlers.WebhookRequest{Name: in.Name, URL: in.URL, Events: in.Events, Headers: in.Headers, Secret: in.Secret, IsActive: active}
+	var w handlers.WebhookResponse
+	if err := c.put("/api/webhooks/"+pathID(in.ID), body, &w); err != nil {
+		return "", nil, err
+	}
+	c.audit(auditWebhooks, in.ID, models.AuditActionUpdated, "update_webhook", map[string]any{"changes": strings.Join(changes, "; ")})
+	return "Updated webhook " + w.Name + ":\n- " + strings.Join(changes, "\n- "), toWebhookView(w), nil
+}
+
+func testWebhook(c *call, in idInput) (string, any, error) {
+	if err := c.post("/api/webhooks/"+pathID(in.ID)+"/test", nil, nil); err != nil {
+		return "", nil, err
+	}
+	return "The receiver accepted the test event.", map[string]any{"ok": true}, nil
+}
+
+func mapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }

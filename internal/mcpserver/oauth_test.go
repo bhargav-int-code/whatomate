@@ -399,7 +399,7 @@ func TestOAuth_MetadataDocumentClient(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, e.apiCall(t, http.MethodGet, "/api/oauth/requests/"+reqID, nil, &req))
 	assert.Equal(t, "ChatGPT", req.ClientName)
-	assert.Len(t, req.Scopes, 5, "no scope parameter asks for all scopes")
+	assert.Len(t, req.Scopes, 8, "no scope parameter asks for all scopes")
 }
 
 func TestOAuth_TokenForAnotherServerIsRejected(t *testing.T) {

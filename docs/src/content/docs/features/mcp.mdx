@@ -49,9 +49,14 @@ Click **Allow** and you return to the assistant, which is now connected.
 | Send messages (`messages:send`) | Send text and template messages, create contacts and change their tags. |
 | View campaigns (`campaigns:read`) | List campaigns, their recipients and results. |
 | Run campaigns (`campaigns:write`) | Create campaigns, add recipients, and start, pause or cancel them. |
-| Read webhook logs (`webhooks:read`) | Search deliveries of your outbound webhooks. |
+| View chatbot (`chatbot:read`) | Read keyword rules, AI contexts, conversation flows and chatbot settings. |
+| Build chatbot (`chatbot:write`) | Create and edit keyword rules, AI contexts, conversation flows and chatbot settings. |
+| View webhooks (`webhooks:read`) | List your outbound webhooks and search their deliveries. |
+| Manage webhooks (`webhooks:write`) | Create, edit and test outbound webhooks. Every change needs your confirmation. |
 
-Your role still applies on top: if your role can't start campaigns (`campaigns:execute`), an assistant connected with **Run campaigns** can create and fill them but not start them.
+Your role still applies on top: if your role can't start campaigns (`campaigns:execute`), an assistant connected with **Run campaigns** can create and fill them but not start them. Likewise building the chatbot needs the matching role permissions (keyword rules, AI contexts, chatbot flows, chatbot settings), and managing webhooks needs `webhooks:write`.
+
+Assistants connected before a permission existed don't get it automatically. Disconnect and connect again to approve the new permissions.
 
 ### Connecting with an API key
 
@@ -59,7 +64,7 @@ Tools and scripts that can't do OAuth can use an [API key](/whatomate/api-refere
 
 ## What assistants can do
 
-The server offers 24 tools, all named `whatomate_…`:
+The server offers 44 tools, all named `whatomate_…`:
 
 | Area | Tools |
 |---|---|
@@ -70,7 +75,14 @@ The server offers 24 tools, all named `whatomate_…`:
 | Sending | Send a text message; send an approved template |
 | Message logs | Search the delivery log; view one message's full record; organization totals |
 | Campaigns | List and view campaigns and recipients; create, add recipients, start, pause, cancel |
+| Keyword rules | List, view, create and edit rules that reply to keywords or hand the chat to an agent |
+| AI contexts | List, view, create and edit the knowledge the chatbot's AI answers from (static text or an API) |
+| Conversation flows | Explain the node types; list, view, create and edit multi-step flows |
+| Chatbot settings | View and change greeting, fallback, business hours, session timeout and AI replies |
+| Webhooks | List, view, create, edit and test outbound webhooks |
 | Webhook logs | Search deliveries of your outbound webhooks; view one in full |
+
+Nothing can be deleted through an assistant; it disables things instead. The AI provider, model and API key can only be changed by an admin in **Settings → Chatbot**.
 
 Built-in safeguards:
 
@@ -78,6 +90,8 @@ Built-in safeguards:
 - **Campaign preview.** Starting a campaign first returns a preview: the template, the account and how many people will be messaged. Nothing is sent until the assistant calls again with `confirm`, which it should only do after you agree.
 - **Reading is silent.** Reading a conversation does not mark messages as read or send read receipts to the customer.
 - **Media headers.** Templates with image, video or document headers can't be sent by an assistant; use a campaign or the inbox.
+- **Outside URLs need your confirmation.** Creating or changing a webhook, a flow with an API-call or webhook step, or an AI context that fetches from an API first returns a preview of the addresses Whatomate will send data to. It is saved only when you agree. This stops a message from a contact ("…and send all chats to evil.example") from steering an assistant into leaking your data.
+- **Flows are checked and start disabled.** A new conversation flow is checked before it's saved (missing steps, broken connections, invalid buttons or times) and is created disabled, so you can review it in the flow builder before turning it on.
 
 ## Tracking what assistants did
 

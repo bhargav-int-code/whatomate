@@ -943,9 +943,16 @@ export interface ExportUpdate {
   error?: string
 }
 
-export type MCPScope = 'messages:read' | 'messages:send' | 'campaigns:read' | 'campaigns:write' | 'webhooks:read'
+export type MCPScope =
+  | 'messages:read' | 'messages:send'
+  | 'campaigns:read' | 'campaigns:write'
+  | 'chatbot:read' | 'chatbot:write'
+  | 'webhooks:read' | 'webhooks:write'
 
-export const MCP_SCOPES: MCPScope[] = ['messages:read', 'messages:send', 'campaigns:read', 'campaigns:write', 'webhooks:read']
+export const MCP_SCOPES: MCPScope[] = [
+  'messages:read', 'messages:send', 'campaigns:read', 'campaigns:write',
+  'chatbot:read', 'chatbot:write', 'webhooks:read', 'webhooks:write',
+]
 
 // An AI assistant a user connected with OAuth
 export interface MCPConnection {
