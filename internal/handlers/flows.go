@@ -279,7 +279,7 @@ func (a *App) SaveFlowToMeta(r *fastglue.Request) error {
 	}
 
 	// Create WhatsApp API client
-	waClient := whatsapp.New(a.Log)
+	waClient := a.WhatsApp
 	waAccount := a.toWhatsAppAccount(account)
 
 	a.Log.Info("SaveFlowToMeta: Account details",
@@ -331,7 +331,8 @@ func (a *App) SaveFlowToMeta(r *fastglue.Request) error {
 			a.DB.Model(flow).Updates(map[string]any{
 				"meta_flow_id": metaFlowID,
 			})
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update flow JSON", nil, "")
+			// Meta's validation errors say what to fix, so pass them on
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Meta rejected the flow JSON: "+err.Error(), nil, "")
 		}
 	}
 
@@ -391,7 +392,7 @@ func (a *App) PublishFlow(r *fastglue.Request) error {
 	}
 
 	// Create WhatsApp API client
-	waClient := whatsapp.New(a.Log)
+	waClient := a.WhatsApp
 	waAccount := a.toWhatsAppAccount(account)
 
 	ctx := context.Background()
@@ -459,7 +460,7 @@ func (a *App) DeprecateFlow(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
 		}
 
-		waClient := whatsapp.New(a.Log)
+		waClient := a.WhatsApp
 		waAccount := a.toWhatsAppAccount(account)
 
 		ctx := context.Background()
@@ -557,7 +558,7 @@ func (a *App) SyncFlows(r *fastglue.Request) error {
 	}
 
 	// Create WhatsApp API client
-	waClient := whatsapp.New(a.Log)
+	waClient := a.WhatsApp
 	waAccount := a.toWhatsAppAccount(account)
 
 	ctx := context.Background()

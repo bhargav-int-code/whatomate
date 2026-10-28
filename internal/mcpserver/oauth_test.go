@@ -197,7 +197,7 @@ func TestOAuth_FullFlowGrantsChosenScopes(t *testing.T) {
 	require.NoError(t, err)
 	list, err := cs.ListTools(context.Background(), nil)
 	require.NoError(t, err)
-	assert.Len(t, list.Tools, 10, "only messages:read tools")
+	assert.Len(t, list.Tools, 12, "only messages:read tools")
 	for _, tool := range list.Tools {
 		assert.NotContains(t, tool.Name, "send_", tool.Name)
 		assert.NotContains(t, tool.Name, "campaign", tool.Name)
@@ -399,7 +399,7 @@ func TestOAuth_MetadataDocumentClient(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, e.apiCall(t, http.MethodGet, "/api/oauth/requests/"+reqID, nil, &req))
 	assert.Equal(t, "ChatGPT", req.ClientName)
-	assert.Len(t, req.Scopes, 8, "no scope parameter asks for all scopes")
+	assert.Len(t, req.Scopes, 10, "no scope parameter asks for all scopes")
 }
 
 func TestOAuth_TokenForAnotherServerIsRejected(t *testing.T) {

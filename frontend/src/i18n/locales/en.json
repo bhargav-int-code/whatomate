@@ -2767,7 +2767,7 @@
     "scopes": {
       "messages:read": {
         "label": "Read messages",
-        "desc": "Contacts, conversations, templates, message logs and stats"
+        "desc": "Contacts, conversations, templates, WhatsApp Flows, message logs and stats"
       },
       "messages:send": {
         "label": "Send messages",
@@ -2780,6 +2780,14 @@
       "campaigns:write": {
         "label": "Run campaigns",
         "desc": "Create campaigns, add recipients, start, pause and cancel them"
+      },
+      "templates:write": {
+        "label": "Manage templates",
+        "desc": "Create and edit draft templates and submit them to Meta (each submission needs your confirmation)"
+      },
+      "flows:write": {
+        "label": "Manage WhatsApp Flows",
+        "desc": "Create and edit WhatsApp Flows, check them at Meta and publish them (publishing needs your confirmation)"
       },
       "chatbot:read": {
         "label": "View chatbot",

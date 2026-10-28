@@ -946,12 +946,13 @@ export interface ExportUpdate {
 export type MCPScope =
   | 'messages:read' | 'messages:send'
   | 'campaigns:read' | 'campaigns:write'
+  | 'templates:write' | 'flows:write'
   | 'chatbot:read' | 'chatbot:write'
   | 'webhooks:read' | 'webhooks:write'
 
 export const MCP_SCOPES: MCPScope[] = [
   'messages:read', 'messages:send', 'campaigns:read', 'campaigns:write',
-  'chatbot:read', 'chatbot:write', 'webhooks:read', 'webhooks:write',
+  'templates:write', 'flows:write', 'chatbot:read', 'chatbot:write', 'webhooks:read', 'webhooks:write',
 ]
 
 // An AI assistant a user connected with OAuth

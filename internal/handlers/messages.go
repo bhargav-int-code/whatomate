@@ -770,6 +770,10 @@ func (a *App) getMessagePreview(req OutgoingMessageRequest) string {
 // ============================================================================
 
 // SendTemplateMessageRequest represents the request to send a template message
+// maxHeaderMediaBytes caps template header media downloaded from a URL
+// (WhatsApp accepts up to 16 MB videos; documents above this are rare).
+const maxHeaderMediaBytes = 25 << 20
+
 type SendTemplateMessageRequest struct {
 	ContactID      string            `json:"contact_id"`
 	PhoneNumber    string            `json:"phone_number"`    // Alternative to contact_id - send to phone directly
@@ -1005,8 +1009,13 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			// Option 1: Pre-uploaded WhatsApp media ID — use directly (no local preview)
 			headerMediaID = req.HeaderMediaID
 		} else if req.HeaderMediaURL != "" {
-			// Option 2: Download from URL, then upload to WhatsApp
-			resp, err := http.Get(req.HeaderMediaURL)
+			// Option 2: Download from URL, then upload to WhatsApp. The shared
+			// client refuses private addresses, and the size is capped.
+			client := a.HTTPClient
+			if client == nil {
+				client = http.DefaultClient
+			}
+			resp, err := client.Get(req.HeaderMediaURL)
 			if err != nil {
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to download header media from URL", nil, "")
 			}
@@ -1014,10 +1023,13 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			if resp.StatusCode != http.StatusOK {
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, fmt.Sprintf("Header media URL returned status %d", resp.StatusCode), nil, "")
 			}
-			headerMediaData, err = io.ReadAll(resp.Body)
+			headerMediaData, err = io.ReadAll(io.LimitReader(resp.Body, maxHeaderMediaBytes+1))
 			if err != nil {
 				a.Log.Error("Failed to read header media from URL", "error", err)
 				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read header media from URL", nil, "")
+			}
+			if len(headerMediaData) > maxHeaderMediaBytes {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, fmt.Sprintf("Header media is larger than %d MB", maxHeaderMediaBytes>>20), nil, "")
 			}
 			headerMimeType = resp.Header.Get("Content-Type")
 			if headerMimeType == "" {

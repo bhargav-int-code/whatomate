@@ -31,6 +31,10 @@ func (c *call) put(path string, body, out any) error {
 	return c.s.dispatch.do(c.ctx, c.p, http.MethodPut, path, nil, body, out)
 }
 
+func (c *call) upload(path string, fields map[string]string, fileField, filename, mimeType string, data []byte, out any) error {
+	return c.s.dispatch.upload(c.ctx, c.p, path, fields, fileField, filename, mimeType, data, out)
+}
+
 // toolFunc implements a tool. It returns markdown for the model to read and
 // structured data (a struct or map, or nil) for clients that use it.
 type toolFunc[In any] func(c *call, in In) (text string, data any, err error)
