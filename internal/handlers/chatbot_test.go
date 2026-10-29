@@ -2908,3 +2908,47 @@ func TestApp_UpdateChatbotSettings_AcceptsSingleURLButton(t *testing.T) {
 	require.NoError(t, app.UpdateChatbotSettings(req))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 }
+
+// GORM omits false on insert and is_enabled defaults to true in the
+// database, so creating something disabled used to create it enabled.
+func TestApp_CreateChatbotItems_RespectEnabled(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
+
+	create := func(handler func(*fastglue.Request) error, body map[string]any) uuid.UUID {
+		t.Helper()
+		req := testutil.NewJSONRequest(t, body)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		require.NoError(t, handler(req))
+		require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req)))
+		var resp struct {
+			Data struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+		return uuid.MustParse(resp.Data.ID)
+	}
+	keyword := func(extra map[string]any) map[string]any {
+		body := map[string]any{"name": "k", "keywords": []string{"k"}, "response_type": "text", "response_content": map[string]any{"body": "hi"}}
+		for k, v := range extra {
+			body[k] = v
+		}
+		return body
+	}
+
+	var disabled, defaulted models.KeywordRule
+	require.NoError(t, app.DB.First(&disabled, create(app.CreateKeywordRule, keyword(map[string]any{"enabled": false}))).Error)
+	assert.False(t, disabled.IsEnabled, "explicit false is kept")
+	require.NoError(t, app.DB.First(&defaulted, create(app.CreateKeywordRule, keyword(nil))).Error)
+	assert.True(t, defaulted.IsEnabled, "omitting enabled keeps the old default")
+
+	var flow models.ChatbotFlow
+	require.NoError(t, app.DB.First(&flow, create(app.CreateChatbotFlow, map[string]any{"name": "f", "trigger_keywords": []string{"f"}, "enabled": false})).Error)
+	assert.False(t, flow.IsEnabled)
+
+	var ctx models.AIContext
+	require.NoError(t, app.DB.First(&ctx, create(app.CreateAIContext, map[string]any{"name": "c", "context_type": "static", "static_content": "x", "enabled": false})).Error)
+	assert.False(t, ctx.IsEnabled)
+}

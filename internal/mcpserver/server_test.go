@@ -5,9 +5,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/mcpserver"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,6 +34,7 @@ import (
 // env is a running Whatomate API with the MCP endpoint, reachable through
 // an in-memory listener.
 type env struct {
+	meta   *fakeMeta
 	app    *handlers.App
 	org    *models.Organization
 	user   *models.User
@@ -61,6 +66,8 @@ func newEnvWithClient(t *testing.T, httpClient *http.Client, permissionKeys ...s
 		Redis:      rdb,
 		HTTPClient: httpClient,
 	}
+	meta := newFakeMeta(t)
+	app.WhatsApp = whatsapp.NewWithBaseURL(app.Log, meta.server.URL)
 
 	org := testutil.CreateTestOrganization(t, db)
 	var role *models.CustomRole
@@ -72,7 +79,7 @@ func newEnvWithClient(t *testing.T, httpClient *http.Client, permissionKeys ...s
 	user := testutil.CreateTestUser(t, db, org.ID, testutil.WithRoleID(&role.ID))
 	testutil.CreateTestWhatsAppAccount(t, db, org.ID)
 
-	e := &env{app: app, org: org, user: user, apiKey: createAPIKey(t, app, org.ID, user.ID)}
+	e := &env{meta: meta, app: app, org: org, user: user, apiKey: createAPIKey(t, app, org.ID, user.ID)}
 
 	g := fastglue.NewGlue()
 	g.Before(func(r *fastglue.Request) *fastglue.Request {
@@ -117,7 +124,19 @@ func registerRoutes(g *fastglue.Fastglue, app *handlers.App) {
 	g.POST("/api/contacts/{id}/messages", app.SendMessage)
 	g.POST("/api/messages/template", app.SendTemplateMessage)
 	g.GET("/api/templates", app.ListTemplates)
+	g.POST("/api/templates", app.CreateTemplate)
+	g.POST("/api/templates/sync", app.SyncTemplates)
+	g.POST("/api/templates/upload-media", app.UploadTemplateMedia)
 	g.GET("/api/templates/{id}", app.GetTemplate)
+	g.PUT("/api/templates/{id}", app.UpdateTemplate)
+	g.POST("/api/templates/{id}/publish", app.SubmitTemplate)
+	g.GET("/api/flows", app.ListFlows)
+	g.POST("/api/flows", app.CreateFlow)
+	g.GET("/api/flows/{id}", app.GetFlow)
+	g.PUT("/api/flows/{id}", app.UpdateFlow)
+	g.POST("/api/flows/{id}/save-to-meta", app.SaveFlowToMeta)
+	g.POST("/api/flows/{id}/publish", app.PublishFlow)
+	g.POST("/api/flows/{id}/duplicate", app.DuplicateFlow)
 	g.GET("/api/message-logs", app.ListMessageLogs)
 	g.GET("/api/message-logs/{id}", app.GetMessageLog)
 	g.GET("/api/analytics/dashboard", app.GetDashboardStats)
@@ -131,6 +150,25 @@ func registerRoutes(g *fastglue.Fastglue, app *handlers.App) {
 	g.GET("/api/campaigns/{id}/recipients", app.GetCampaignRecipients)
 	g.GET("/api/webhook-logs", app.ListWebhookLogs)
 	g.GET("/api/webhook-logs/{id}", app.GetWebhookLog)
+	g.GET("/api/chatbot/settings", app.GetChatbotSettings)
+	g.PUT("/api/chatbot/settings", app.UpdateChatbotSettings)
+	g.GET("/api/chatbot/keywords", app.ListKeywordRules)
+	g.POST("/api/chatbot/keywords", app.CreateKeywordRule)
+	g.GET("/api/chatbot/keywords/{id}", app.GetKeywordRule)
+	g.PUT("/api/chatbot/keywords/{id}", app.UpdateKeywordRule)
+	g.GET("/api/chatbot/flows", app.ListChatbotFlows)
+	g.POST("/api/chatbot/flows", app.CreateChatbotFlow)
+	g.GET("/api/chatbot/flows/{id}", app.GetChatbotFlow)
+	g.PUT("/api/chatbot/flows/{id}", app.UpdateChatbotFlow)
+	g.GET("/api/chatbot/ai-contexts", app.ListAIContexts)
+	g.POST("/api/chatbot/ai-contexts", app.CreateAIContext)
+	g.GET("/api/chatbot/ai-contexts/{id}", app.GetAIContext)
+	g.PUT("/api/chatbot/ai-contexts/{id}", app.UpdateAIContext)
+	g.GET("/api/webhooks", app.ListWebhooks)
+	g.POST("/api/webhooks", app.CreateWebhook)
+	g.GET("/api/webhooks/{id}", app.GetWebhook)
+	g.PUT("/api/webhooks/{id}", app.UpdateWebhook)
+	g.POST("/api/webhooks/{id}/test", app.TestWebhook)
 	g.GET("/api/oauth/requests/{id}", app.GetOAuthRequest)
 	g.POST("/api/oauth/requests/{id}/approve", app.ApproveOAuthRequest)
 	g.POST("/api/oauth/requests/{id}/deny", app.DenyOAuthRequest)
@@ -254,7 +292,7 @@ func TestMCP_ListsAllTools(t *testing.T) {
 
 	res, err := cs.ListTools(context.Background(), nil)
 	require.NoError(t, err)
-	assert.Len(t, res.Tools, 24)
+	assert.Len(t, res.Tools, 55)
 	for _, tool := range res.Tools {
 		assert.True(t, strings.HasPrefix(tool.Name, "whatomate_"), tool.Name)
 		assert.NotEmpty(t, tool.Description, tool.Name)
@@ -400,4 +438,57 @@ func TestMCP_StartCampaignNeedsExecutePermission(t *testing.T) {
 	res, text := callTool(t, cs, "whatomate_start_campaign", map[string]any{"campaign_id": uuid.New().String(), "confirm": true})
 	assert.True(t, res.IsError)
 	assert.Contains(t, text, "campaigns:execute")
+}
+
+// fakeMeta stands in for Meta's Graph API.
+type fakeMeta struct {
+	server *httptest.Server
+	mu     sync.Mutex
+	paths  []string
+	// rejectFlow makes flow JSON uploads fail Meta's validation
+	rejectFlow bool
+}
+
+func newFakeMeta(t *testing.T) *fakeMeta {
+	t.Helper()
+	m := &fakeMeta{}
+	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		m.paths = append(m.paths, r.Method+" "+r.URL.Path)
+		reject := m.rejectFlow
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		p := r.URL.Path
+		switch {
+		case strings.HasSuffix(p, "/uploads"):
+			_, _ = io.WriteString(w, `{"id":"upload:abc"}`)
+		case strings.HasSuffix(p, "/upload:abc"):
+			_, _ = io.WriteString(w, `{"h":"4::aGFuZGxlLWZvci1zYW1wbGUtbWVkaWE="}`)
+		case strings.HasSuffix(p, "/message_templates") && r.Method == http.MethodPost:
+			_, _ = io.WriteString(w, `{"id":"meta-tmpl-1","status":"PENDING","category":"UTILITY"}`)
+		case strings.HasSuffix(p, "/message_templates"):
+			_, _ = io.WriteString(w, `{"data":[]}`)
+		case strings.HasSuffix(p, "/flows") && r.Method == http.MethodPost:
+			_, _ = io.WriteString(w, `{"id":"meta-flow-1"}`)
+		case strings.HasSuffix(p, "/meta-flow-1/assets") && reject:
+			_, _ = io.WriteString(w, `{"success":false,"validation_errors":[{"error":"INVALID_PROPERTY_VALUE","message":"Invalid value for property 'type' at /screens/0/layout/children/0"}]}`)
+		case strings.HasSuffix(p, "/meta-flow-1/assets"):
+			_, _ = io.WriteString(w, `{"success":true}`)
+		case strings.HasSuffix(p, "/meta-flow-1/publish"):
+			_, _ = io.WriteString(w, `{"success":true}`)
+		case strings.HasSuffix(p, "/meta-flow-1"):
+			_, _ = io.WriteString(w, `{"id":"meta-flow-1","name":"Booking","status":"DRAFT","preview":{"preview_url":"https://business.facebook.com/wa/manage/flows/preview/meta-flow-1"}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":{"message":"unexpected call `+r.Method+` `+p+`","code":100}}`)
+		}
+	}))
+	t.Cleanup(m.server.Close)
+	return m
+}
+
+func (m *fakeMeta) calls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.paths...)
 }

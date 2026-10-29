@@ -35,7 +35,7 @@ func init() {
 	defineTool(ScopeMessagesSend, "chat:write", &mcp.Tool{
 		Name: "whatomate_send_template_message",
 		Description: "Send an approved WhatsApp template to a phone number or contact. Works any time, including outside the 24-hour service window. " +
-			"Creates the contact if the phone number is new. Templates with image, video or document headers are not supported here; use a campaign or the Whatomate app.",
+			"Creates the contact if the phone number is new. For a template with an image, video or document header, pass header_media_url (a public file URL).",
 		Annotations: outbound("Send template message", false),
 	}, sendTemplateMessage)
 
@@ -188,7 +188,7 @@ func getTemplate(c *call, in templateIDInput) (string, any, error) {
 		fmt.Fprintf(&b, "\nHeader variable: %s. Pass it in header_params.", hv[0])
 	}
 	if t.HeaderType == "IMAGE" || t.HeaderType == "VIDEO" || t.HeaderType == "DOCUMENT" {
-		b.WriteString("\nThis template has a media header, which whatomate_send_template_message cannot fill; use a campaign or the Whatomate app.")
+		fmt.Fprintf(&b, "\nThis template has a %s header: pass header_media_url when sending it.", strings.ToLower(t.HeaderType))
 	}
 	return b.String(), out, nil
 }
@@ -250,6 +250,8 @@ type sendTemplateInput struct {
 	HeaderParams    map[string]string `json:"header_params,omitempty" jsonschema:"Value for a text header variable, keyed by its name"`
 	ButtonParams    map[string]string `json:"button_params,omitempty" jsonschema:"Dynamic URL button suffixes keyed by button index, e.g. {\"0\": \"order/123\"}"`
 	WhatsAppAccount string            `json:"whatsapp_account,omitempty" jsonschema:"Send from this WhatsApp account name (default: the organization's default)"`
+	HeaderMediaURL  string            `json:"header_media_url,omitempty" jsonschema:"For templates with an image, video or document header: public URL of the file (at most 25 MB)"`
+	HeaderFilename  string            `json:"header_filename,omitempty" jsonschema:"For document headers: the file name the contact sees, e.g. invoice.pdf"`
 }
 
 func sendTemplateMessage(c *call, in sendTemplateInput) (string, any, error) {
@@ -268,6 +270,9 @@ func sendTemplateMessage(c *call, in sendTemplateInput) (string, any, error) {
 		HeaderParams:   in.HeaderParams,
 		ButtonParams:   in.ButtonParams,
 		AccountName:    in.WhatsAppAccount,
+
+		HeaderMediaURL:      in.HeaderMediaURL,
+		HeaderMediaFilename: in.HeaderFilename,
 	}
 	var msg handlers.MessageResponse
 	if err := c.post("/api/messages/template", body, &msg); err != nil {

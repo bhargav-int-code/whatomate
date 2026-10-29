@@ -14,6 +14,7 @@ const (
 	auditContacts  = models.ResourceContacts
 	auditCampaigns = models.ResourceCampaigns
 	auditMessages  = "messages"
+	auditWebhooks  = "webhook"
 )
 
 // audit records a write tool's action in the organization's audit log, so it

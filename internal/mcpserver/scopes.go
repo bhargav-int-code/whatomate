@@ -10,7 +10,12 @@ const (
 	ScopeMessagesSend   = oauth.ScopeMessagesSend
 	ScopeCampaignsRead  = oauth.ScopeCampaignsRead
 	ScopeCampaignsWrite = oauth.ScopeCampaignsWrite
+	ScopeTemplatesWrite = oauth.ScopeTemplatesWrite
+	ScopeFlowsWrite     = oauth.ScopeFlowsWrite
+	ScopeChatbotRead    = oauth.ScopeChatbotRead
+	ScopeChatbotWrite   = oauth.ScopeChatbotWrite
 	ScopeWebhooksRead   = oauth.ScopeWebhooksRead
+	ScopeWebhooksWrite  = oauth.ScopeWebhooksWrite
 )
 
 // allScopes is every scope, in the order they are presented to users.

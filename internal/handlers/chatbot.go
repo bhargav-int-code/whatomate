@@ -623,7 +623,7 @@ func (a *App) CreateKeywordRule(r *fastglue.Request) error {
 		ResponseType    models.ResponseType `json:"response_type"`
 		ResponseContent map[string]any      `json:"response_content"`
 		Priority        int                 `json:"priority"`
-		Enabled         bool                `json:"enabled"`
+		Enabled         *bool               `json:"enabled"`
 	}
 
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
@@ -645,6 +645,8 @@ func (a *App) CreateKeywordRule(r *fastglue.Request) error {
 		req.Name = req.Keywords[0]
 	}
 
+	// Omitting enabled keeps the API's historical default of enabled
+	enabled := req.Enabled == nil || *req.Enabled
 	rule := models.KeywordRule{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
 		OrganizationID:  orgID,
@@ -654,7 +656,7 @@ func (a *App) CreateKeywordRule(r *fastglue.Request) error {
 		ResponseType:    req.ResponseType,
 		ResponseContent: models.JSONB(req.ResponseContent),
 		Priority:        req.Priority,
-		IsEnabled:       req.Enabled,
+		IsEnabled:       enabled,
 		CreatedByID:     &userID,
 		UpdatedByID:     &userID,
 	}
@@ -662,6 +664,13 @@ func (a *App) CreateKeywordRule(r *fastglue.Request) error {
 	if err := a.DB.Create(&rule).Error; err != nil {
 		a.Log.Error("Failed to create keyword rule", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create keyword rule", nil, "")
+	}
+	// is_enabled defaults to true in the database and GORM omits false on
+	// insert, so a rule created disabled must be switched off explicitly
+	if !enabled {
+		if err := a.DB.Model(&rule).Update("is_enabled", false).Error; err != nil {
+			a.Log.Error("Failed to disable new keyword rule", "error", err)
+		}
 	}
 
 	// Invalidate cache
@@ -891,7 +900,7 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 		CompletionConfig  map[string]any `json:"completion_config"`
 		PanelConfig       map[string]any `json:"panel_config"`
 		Graph             map[string]any `json:"graph"`
-		Enabled           bool           `json:"enabled"`
+		Enabled           *bool          `json:"enabled"`
 	}
 
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
@@ -902,6 +911,8 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Name is required", nil, "")
 	}
 
+	// Omitting enabled keeps the API's historical default of enabled
+	enabled := req.Enabled == nil || *req.Enabled
 	flow := models.ChatbotFlow{
 		BaseModel:         models.BaseModel{ID: uuid.New()},
 		OrganizationID:    orgID,
@@ -914,7 +925,7 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 		CompletionConfig:  models.JSONB(req.CompletionConfig),
 		PanelConfig:       models.JSONB(req.PanelConfig),
 		Graph:             models.JSONB(req.Graph),
-		IsEnabled:         req.Enabled,
+		IsEnabled:         enabled,
 		CreatedByID:       &userID,
 		UpdatedByID:       &userID,
 	}
@@ -922,6 +933,12 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 	if err := a.DB.Create(&flow).Error; err != nil {
 		a.Log.Error("Failed to create flow", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create flow", nil, "")
+	}
+	// See CreateKeywordRule: GORM omits false, so disable explicitly
+	if !enabled {
+		if err := a.DB.Model(&flow).Update("is_enabled", false).Error; err != nil {
+			a.Log.Error("Failed to disable new flow", "error", err)
+		}
 	}
 
 	// Invalidate cache
@@ -1164,7 +1181,7 @@ func (a *App) CreateAIContext(r *fastglue.Request) error {
 		StaticContent   string             `json:"static_content"`
 		ApiConfig       models.JSONB       `json:"api_config"`
 		Priority        int                `json:"priority"`
-		Enabled         bool               `json:"enabled"`
+		Enabled         *bool              `json:"enabled"`
 	}
 
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
@@ -1178,6 +1195,8 @@ func (a *App) CreateAIContext(r *fastglue.Request) error {
 		req.ContextType = models.ContextTypeStatic
 	}
 
+	// Omitting enabled keeps the API's historical default of enabled
+	enabled := req.Enabled == nil || *req.Enabled
 	ctx := models.AIContext{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
 		OrganizationID:  orgID,
@@ -1187,7 +1206,7 @@ func (a *App) CreateAIContext(r *fastglue.Request) error {
 		StaticContent:   req.StaticContent,
 		ApiConfig:       req.ApiConfig,
 		Priority:        req.Priority,
-		IsEnabled:       req.Enabled,
+		IsEnabled:       enabled,
 		CreatedByID:     &userID,
 		UpdatedByID:     &userID,
 	}
@@ -1195,6 +1214,12 @@ func (a *App) CreateAIContext(r *fastglue.Request) error {
 	if err := a.DB.Create(&ctx).Error; err != nil {
 		a.Log.Error("Failed to create AI context", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create AI context", nil, "")
+	}
+	// See CreateKeywordRule: GORM omits false, so disable explicitly
+	if !enabled {
+		if err := a.DB.Model(&ctx).Update("is_enabled", false).Error; err != nil {
+			a.Log.Error("Failed to disable new AI context", "error", err)
+		}
 	}
 
 	// Invalidate cache

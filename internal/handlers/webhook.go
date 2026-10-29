@@ -410,6 +410,17 @@ func statusPriority(status models.MessageStatus) int {
 	}
 }
 
+// claimStatusTime sets a message's delivered_at or read_at to t if it is still
+// empty, and reports whether this call set it.
+func (a *App) claimStatusTime(messageID uuid.UUID, column string, t time.Time) bool {
+	res := a.DB.Model(&models.Message{}).Where("id = ? AND "+column+" IS NULL", messageID).Update(column, t)
+	if res.Error != nil {
+		a.Log.Error("Failed to record message status time", "error", res.Error, "message_id", messageID, "column", column)
+		return false
+	}
+	return res.RowsAffected == 1
+}
+
 // updateMessageStatus applies a Meta status callback to the matching message
 // in the messages table. status.RecipientID is Meta's recipient_id; it may be
 // empty for username-only (BSUID) recipients.
@@ -440,20 +451,11 @@ func (a *App) updateMessageStatus(status WebhookStatus) {
 
 	// Delivery timestamps and pricing are recorded even when the status itself
 	// doesn't progress: Meta can send "delivered" after "read", and the logs
-	// should still show when the message was delivered. delivered_at and
-	// read_at are set once; Meta's "sent" time replaces our acceptance time.
+	// should still show when the message was delivered. Meta's "sent" time
+	// replaces our acceptance time.
 	eventTime := statusEventTime(status.Timestamp)
-	switch newStatus {
-	case models.MessageStatusSent:
+	if newStatus == models.MessageStatusSent {
 		updates["sent_at"] = eventTime
-	case models.MessageStatusDelivered:
-		if message.DeliveredAt == nil {
-			updates["delivered_at"] = eventTime
-		}
-	case models.MessageStatusRead:
-		if message.ReadAt == nil {
-			updates["read_at"] = eventTime
-		}
 	}
 	if status.Pricing != nil && status.Pricing.Category != "" && message.PricingCategory == "" {
 		updates["pricing_category"] = status.Pricing.Category
@@ -478,7 +480,22 @@ func (a *App) updateMessageStatus(status WebhookStatus) {
 		}
 	}
 
-	if len(updates) == 0 {
+	// delivered_at and read_at are set once. Claiming them atomically means
+	// that when Meta repeats a callback, even concurrently, exactly one of
+	// them fires message.delivered or message.read.
+	firstStatus := false
+	switch newStatus {
+	case models.MessageStatusDelivered:
+		if firstStatus = a.claimStatusTime(message.ID, "delivered_at", eventTime); firstStatus {
+			message.DeliveredAt = &eventTime
+		}
+	case models.MessageStatusRead:
+		if firstStatus = a.claimStatusTime(message.ID, "read_at", eventTime); firstStatus {
+			message.ReadAt = &eventTime
+		}
+	}
+
+	if len(updates) == 0 && !firstStatus {
 		a.Log.Debug("Ignoring status update - not a progression",
 			"message_id", message.ID,
 			"current_status", message.Status,
@@ -486,22 +503,42 @@ func (a *App) updateMessageStatus(status WebhookStatus) {
 		return
 	}
 
-	if err := a.DB.Model(&message).Updates(updates).Error; err != nil {
-		a.Log.Error("Failed to update message status", "error", err, "message_id", message.ID)
-		return
+	if len(updates) > 0 {
+		if err := a.DB.Model(&message).Updates(updates).Error; err != nil {
+			a.Log.Error("Failed to update message status", "error", err, "message_id", message.ID)
+			return
+		}
+	}
+
+	needsContact := (newStatus == models.MessageStatusFailed && progressed && !wasFailed) || (firstStatus && !wasFailed)
+	var contact *models.Contact
+	if needsContact {
+		var c models.Contact
+		if err := a.DB.Where("id = ? AND organization_id = ?", message.ContactID, message.OrganizationID).First(&c).Error; err != nil {
+			a.Log.Warn("Contact not found for message webhook", "error", err, "message_id", message.ID)
+		} else {
+			contact = &c
+		}
+	}
+
+	if pc, ok := updates["pricing_category"].(string); ok {
+		message.PricingCategory = pc
+	}
+	if firstStatus && !wasFailed {
+		// Meta's recipient_id is the number it actually delivered to, so it
+		// wins over the contact row, which may have been edited or deleted.
+		a.dispatchMessageStatusWebhook(&message, contact, status.RecipientID, newStatus, eventTime)
 	}
 
 	if !progressed {
-		// Only a late timestamp or pricing was recorded; the visible status,
-		// campaign stats and webhooks are unchanged.
+		// Only a late timestamp or pricing was recorded; the visible status
+		// and campaign stats are unchanged.
 		return
 	}
 
 	a.Log.Info("Updated message status", "message_id", message.ID, "status", statusValue)
 
 	if newStatus == models.MessageStatusFailed && !wasFailed {
-		// Meta's recipient_id is the number it actually tried to deliver to, so
-		// it wins over the contact row, which may have been edited or deleted.
 		failed := MessageFailedEventData{
 			Source:       MessageFailureSourceStatusCallback,
 			ContactPhone: status.RecipientID,
@@ -512,13 +549,7 @@ func (a *App) updateMessageStatus(status WebhookStatus) {
 			failed.ErrorTitle = errors[0].Title
 			failed.ErrorDetails = errors[0].ErrorData.Details
 		}
-		var contact models.Contact
-		if err := a.DB.Where("id = ? AND organization_id = ?", message.ContactID, message.OrganizationID).First(&contact).Error; err != nil {
-			a.Log.Warn("Contact not found for failed message webhook", "error", err, "message_id", message.ID)
-			a.dispatchMessageFailedWebhook(&message, nil, failed)
-		} else {
-			a.dispatchMessageFailedWebhook(&message, &contact, failed)
-		}
+		a.dispatchMessageFailedWebhook(&message, contact, failed)
 	}
 
 	// Update campaign stats and recipient status if this is a campaign message

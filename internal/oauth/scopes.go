@@ -12,7 +12,12 @@ const (
 	ScopeMessagesSend   Scope = "messages:send"   // send messages, create and tag contacts
 	ScopeCampaignsRead  Scope = "campaigns:read"  // campaigns and their recipients
 	ScopeCampaignsWrite Scope = "campaigns:write" // create, fill, start, pause and cancel campaigns
-	ScopeWebhooksRead   Scope = "webhooks:read"   // outbound webhook delivery logs
+	ScopeTemplatesWrite Scope = "templates:write" // create and edit templates, submit them to Meta
+	ScopeFlowsWrite     Scope = "flows:write"     // create and edit WhatsApp flows, save and publish them to Meta
+	ScopeChatbotRead    Scope = "chatbot:read"    // keyword rules, AI contexts, chatbot flows and settings
+	ScopeChatbotWrite   Scope = "chatbot:write"   // create and edit them
+	ScopeWebhooksRead   Scope = "webhooks:read"   // outbound webhooks and their delivery logs
+	ScopeWebhooksWrite  Scope = "webhooks:write"  // create, edit and test outbound webhooks
 )
 
 // AllScopes is every scope, in the order they are presented to users.
@@ -21,7 +26,12 @@ var AllScopes = []Scope{
 	ScopeMessagesSend,
 	ScopeCampaignsRead,
 	ScopeCampaignsWrite,
+	ScopeTemplatesWrite,
+	ScopeFlowsWrite,
+	ScopeChatbotRead,
+	ScopeChatbotWrite,
 	ScopeWebhooksRead,
+	ScopeWebhooksWrite,
 }
 
 func knownScope(s Scope) bool {

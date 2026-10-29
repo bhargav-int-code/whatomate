@@ -59,6 +59,10 @@ func (d MessageFailedEventData) webhookLogReference() (string, string) {
 	return d.MessageID, d.ContactPhone
 }
 
+func (d MessageStatusEventData) webhookLogReference() (string, string) {
+	return d.MessageID, d.ContactPhone
+}
+
 func (d ContactEventData) webhookLogReference() (string, string) { return d.ContactID, d.ContactPhone }
 
 func (d TransferEventData) webhookLogReference() (string, string) {

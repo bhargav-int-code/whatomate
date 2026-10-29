@@ -669,8 +669,24 @@ func TestWorker_Close_NilConsumer(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// recordedWebhooks records the webhooks the worker asks to dispatch.
+type recordedWebhooks struct {
+	sent   []*models.Message
+	failed []string
+}
+
+func (r *recordedWebhooks) DispatchMessageSent(_ *models.WhatsAppAccount, _ *models.Contact, msg *models.Message) {
+	r.sent = append(r.sent, msg)
+}
+
+func (r *recordedWebhooks) DispatchMessageSendFailed(_ *models.Message, _ *models.Contact, errMsg string) {
+	r.failed = append(r.failed, errMsg)
+}
+
 func TestWorker_HandleRecipientJob_Success(t *testing.T) {
 	w := testWorker(t)
+	webhooks := &recordedWebhooks{}
+	w.Webhooks = webhooks
 	org, account, template, campaign, recipient := createTestCampaignData(t, w)
 
 	campaign.HeaderMediaID = "media-123"
@@ -729,10 +745,18 @@ func TestWorker_HandleRecipientJob_Success(t *testing.T) {
 	assert.Equal(t, "/media/documents/invoice.pdf", message.MediaURL)
 	assert.Equal(t, "application/pdf", message.MediaMimeType)
 	assert.Equal(t, "invoice.pdf", message.MediaFilename)
+
+	// message.sent fires for the saved message
+	require.Len(t, webhooks.sent, 1)
+	assert.Equal(t, message.ID, webhooks.sent[0].ID)
+	assert.Equal(t, campaign.ID.String(), webhooks.sent[0].Metadata["campaign_id"])
+	assert.Empty(t, webhooks.failed)
 }
 
 func TestWorker_HandleRecipientJob_WhatsAppError(t *testing.T) {
 	w := testWorker(t)
+	webhooks := &recordedWebhooks{}
+	w.Webhooks = webhooks
 	org, account, _, campaign, recipient := createTestCampaignData(t, w)
 
 	// Create mock server that returns an error
@@ -773,6 +797,11 @@ func TestWorker_HandleRecipientJob_WhatsAppError(t *testing.T) {
 	var updatedCampaign models.BulkMessageCampaign
 	require.NoError(t, w.DB.First(&updatedCampaign, campaign.ID).Error)
 	assert.Equal(t, 1, updatedCampaign.FailedCount)
+
+	// A rejected send fires message.failed, not message.sent
+	require.Len(t, webhooks.failed, 1)
+	assert.Contains(t, webhooks.failed[0], "Invalid phone number")
+	assert.Empty(t, webhooks.sent)
 }
 
 func TestWorker_HandleRecipientJob_CreatesContact(t *testing.T) {

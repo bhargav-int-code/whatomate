@@ -1,11 +1,15 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net"
+	"net/http"
+	"net/textproto"
 	"net/url"
 	"time"
 
@@ -76,6 +80,45 @@ type envelope struct {
 // do calls method path as p and decodes the response's data into out (which
 // may be nil). body, if not nil, is sent as JSON.
 func (d *dispatcher) do(ctx context.Context, p *Principal, method, path string, query url.Values, body, out any) error {
+	var contentType string
+	var payload []byte
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encoding request: %w", err)
+		}
+		contentType, payload = "application/json", b
+	}
+	return d.send(ctx, p, method, path, query, contentType, payload, out)
+}
+
+// upload posts a multipart form with fields and one file to path as p.
+func (d *dispatcher) upload(ctx context.Context, p *Principal, path string, fields map[string]string, fileField, filename, mimeType string, data []byte, out any) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		if err := w.WriteField(k, v); err != nil {
+			return fmt.Errorf("encoding form: %w", err)
+		}
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, fileField, filename))
+	h.Set("Content-Type", mimeType)
+	part, err := w.CreatePart(h)
+	if err != nil {
+		return fmt.Errorf("encoding form: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return fmt.Errorf("encoding form: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("encoding form: %w", err)
+	}
+	return d.send(ctx, p, http.MethodPost, path, nil, w.FormDataContentType(), buf.Bytes(), out)
+}
+
+// send makes the request and decodes the REST envelope.
+func (d *dispatcher) send(ctx context.Context, p *Principal, method, path string, query url.Values, contentType string, payload []byte, out any) error {
 	token, err := d.token(p)
 	if err != nil {
 		return fmt.Errorf("signing request: %w", err)
@@ -94,13 +137,9 @@ func (d *dispatcher) do(ctx context.Context, p *Principal, method, path string, 
 	req.Header.SetMethod(method)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set(clientHeader, p.Client)
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("encoding request: %w", err)
-		}
-		req.Header.SetContentType("application/json")
-		req.SetBody(b)
+	if payload != nil {
+		req.Header.SetContentType(contentType)
+		req.SetBody(payload)
 	}
 
 	deadline := time.Now().Add(dispatchTimeout)

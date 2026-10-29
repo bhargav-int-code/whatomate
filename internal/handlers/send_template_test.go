@@ -2,6 +2,10 @@ package handlers_test
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -11,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
+	"github.com/zerodha/fastglue"
 )
 
 // createTestTemplate creates an approved template in the database.
@@ -787,4 +792,67 @@ func TestApp_SendTemplateMessage(t *testing.T) {
 		_, hasInteractive := data["interactive_data"]
 		assert.False(t, hasInteractive, "interactive_data should not be present for template without buttons")
 	})
+}
+
+// recordingTransport records the URLs requested through an http.Client.
+type recordingTransport struct {
+	mu   sync.Mutex
+	urls []string
+}
+
+func (rt *recordingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	rt.mu.Lock()
+	rt.urls = append(rt.urls, r.URL.String())
+	rt.mu.Unlock()
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// A header media URL comes from the caller, so it must be fetched with the
+// app's client (which refuses private addresses in production) and capped.
+func TestApp_SendTemplateMessage_HeaderMediaURLUsesSafeClient(t *testing.T) {
+	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		if r.URL.Path == "/huge.png" {
+			_, _ = io.Copy(w, io.LimitReader(zeroReader{}, 26<<20))
+			return
+		}
+		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\n"))
+	}))
+	defer media.Close()
+	mockServer := newMockWhatsAppServer()
+	defer mockServer.close()
+
+	app := newMsgTestApp(t, mockServer)
+	app.Config.Storage.LocalPath = t.TempDir() // the header is saved locally for chat previews
+	transport := &recordingTransport{}
+	app.HTTPClient = &http.Client{Transport: transport}
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
+	account := createTestAccount(t, app, org.ID)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+	tpl := createTestTemplate(t, app, org.ID, account.Name)
+	require.NoError(t, app.DB.Model(tpl).Updates(map[string]any{"header_type": "IMAGE", "body_content": "Your court is booked."}).Error)
+
+	send := func(url string) *fastglue.Request {
+		req := testutil.NewJSONRequest(t, map[string]any{"contact_id": contact.ID.String(), "template_name": tpl.Name, "header_media_url": url})
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		require.NoError(t, app.SendTemplateMessage(req))
+		return req
+	}
+
+	req := send(media.URL + "/huge.png")
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), "larger than 25 MB")
+
+	send(media.URL + "/court.png")
+	assert.Contains(t, transport.urls, media.URL+"/court.png", "the download goes through app.HTTPClient")
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
 }
